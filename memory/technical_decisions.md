@@ -7,7 +7,7 @@ metadata:
 
 # 关键技术决策
 
-更新时间：2026-06-19
+更新时间：2026-09-09
 
 ---
 
@@ -238,6 +238,35 @@ thinking 慢主要在**服务端推理**，不在上传。成熟产品里 thinki
 
 ---
 
+## OpenAI 兼容 API 作为默认推理后端（2026-09-09）
+
+### 当前方案
+
+- `OpenAICompatibleReasoner` 使用 OpenAI Chat Completions 多模态消息格式：文本 prompt +
+  `image_url` data URL。
+- API key、Base URL、模型 ID 分别由 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、
+  `OPENAI_MODEL_ID` 配置；`VLM_API_KEY` 作为 API key 兼容变量保留。
+- CLI、调试器、统一配置和 Android on-device 入口默认选择 `openai`；Doubao 和 Gemini
+  仍可显式选择。
+- OpenAI 兼容服务共用一个 reasoner，不为服务商维护硬编码映射或分支。
+
+### 思考强度
+
+`OPENAI_REASONING_EFFORT` 接受 `minimal` / `low` / `medium` / `high` / `xhigh`。
+未设置或设为 `default` 时不发送该字段，让模型使用默认行为。
+
+Android 内嵌的 OpenAI SDK 版本较旧，因此 `reasoning_effort` 通过 `extra_body` 发送，
+避免依赖新 SDK 的显式方法参数。兼容协议不保证每个模型支持全部档位，调用方应按模型
+能力选择；不支持时使用模型默认。
+
+### Why / How to apply
+
+OpenAI Chat Completions 已成为多家视觉模型服务的共同接口。将地址和模型参数化，可以
+在不改代码的情况下切换服务商，同时保留 `Reasoner` Protocol 作为非兼容协议的扩展点。
+新增兼容服务时只配置环境变量，不新增 provider 类；只有请求/响应协议确实不同才新增后端。
+
+---
+
 ## Doubao thinking 模式演化
 
 ### 比赛阶段（已结束）
@@ -264,7 +293,9 @@ thinking 慢主要在**服务端推理**，不在上传。成熟产品里 thinki
 
 **Why：** thinking=enabled 慢 2-3 倍，但识别准确率明显提高（B 站开屏广告自动跳过、复杂搜索场景不再瞎点）。
 
-**How to apply：** 产品默认 `enabled`（准确率优先）；成本敏感场景可切 `disabled`；添加新模型时先探测支持的 thinking 模式集合。**成熟产品里 thinking 开关由终端用户指定，系统不强制关**——优化耗时优先动上传/网络等链路，不要替用户关 thinking。
+**How to apply：** 显式使用 Doubao 后端时默认 `enabled`（准确率优先）；成本敏感场景可切
+`disabled`；添加新模型时先探测支持的 thinking 模式集合。**成熟产品里 thinking 开关由
+终端用户指定，系统不强制关**——优化耗时优先动上传/网络等链路，不要替用户关 thinking。
 
 ---
 

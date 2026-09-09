@@ -7,7 +7,7 @@ metadata:
 
 # 产品路线图
 
-更新时间：2026-07-05
+更新时间：2026-09-09
 
 ---
 
@@ -24,6 +24,14 @@ metadata:
 ---
 
 ## 近期待办
+
+### 0. 通用云端模型接入 ✅（2026-09-09）
+
+- 默认使用 OpenAI Chat Completions 兼容视觉 API
+- API key、Base URL、模型 ID 均可配置
+- 支持选择 `reasoning_effort`，也可使用模型默认行为
+- Gemini 与 Doubao 后端继续保留
+- 后续只需验证更多服务商的协议差异，不维护服务商硬编码列表
 
 ### 1. 应用名解析方案 ✅（2026-07-05 全部完成，含应用名一等公民重构）
 
@@ -91,7 +99,8 @@ metadata:
 
 ### 4. 测试覆盖扩展
 
-**当前：** 42 单元测试 + 2 个真机场景（打开抖音、B 站搜索）
+**当前：** Python 单元测试覆盖核心 Runner、动作解析、应用启动和多个 reasoner；
+已有打开抖音、B 站搜索等真机场景。
 
 **待补充：**
 - 敏感动作拦截真机验证（美团下单、支付宝转账）
@@ -170,7 +179,8 @@ metadata:
 **技术栈：** Kotlin + Jetpack Compose + Room + WorkManager
 
 **模型部署：**
-- **云端推理**（当前方案）：HTTPS 调用 Doubao API，灵活但依赖网络
+- **云端推理**（当前方案）：HTTPS 调用任意 OpenAI 兼容视觉 API，亦可选 Gemini /
+  Doubao，灵活但依赖网络
 - **on-device 推理**（未来可选）：ONNX / TFLite / MediaPipe，隐私优先但模型能力受限
 
 ---

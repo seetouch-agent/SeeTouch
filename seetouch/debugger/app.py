@@ -22,7 +22,7 @@ from ..core.event_bus import EventBus
 from ..core.runner import Runner
 from ..device.android.controller import AndroidController
 from ..logging_config import configure_logging
-from ..reasoning.doubao import DoubaoReasoner
+from ..reasoning.factory import DEFAULT_REASONER, create_reasoner
 from ..safety.guard import Guard
 from .debug_session import DebugSession, StepData
 
@@ -32,7 +32,10 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO]:
+def create_app(
+    settings: AppSettings | None = None,
+    reasoner_name: str = DEFAULT_REASONER,
+) -> tuple[Flask, SocketIO]:
     """创建 Flask 应用和 SocketIO 实例。"""
     app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     app.config["SECRET_KEY"] = os.urandom(24).hex()
@@ -79,7 +82,7 @@ def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO]:
         try:
             # 初始化设备和推理器
             device = AndroidController(serial=serial)
-            reasoner = DoubaoReasoner()
+            reasoner = create_reasoner(reasoner_name)
 
             # Guard 确认回调:通过 WebSocket 通知前端,阻塞等待回复
             # 注意:当前版本直接自动批准,避免阻塞复杂性。
@@ -183,14 +186,18 @@ def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO]:
     return app, socketio
 
 
-def run_server(port: int = 5000, settings: AppSettings | None = None) -> None:
+def run_server(
+    port: int = 5000,
+    settings: AppSettings | None = None,
+    reasoner_name: str = DEFAULT_REASONER,
+) -> None:
     """启动调试器 Web 服务。"""
     load_env()
     if settings is None:
         settings = AppSettings.from_env()
     configure_logging(settings.log_level)
 
-    app, socketio = create_app(settings)
+    app, socketio = create_app(settings, reasoner_name=reasoner_name)
 
     url = f"http://localhost:{port}"
     logger.info("SeeTouch Debugger starting at %s", url)

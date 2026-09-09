@@ -21,7 +21,7 @@ SeeTouch 是一个基于视觉语言模型（VLM）的 Android GUI 自动化工�
 ### 核心特性
 
 - **自然语言控制** — 用中文描述任务，自动完成跨应用操作
-- **视觉理解** — 支持 Gemini / Doubao Vision 多模态模型识别控件、文本、广告等复杂场景  
+- **视觉理解** — 默认支持任意 OpenAI Chat Completions 兼容多模态 API，也可使用 Gemini / Doubao
 - **智能启动** — 应用名一等公民策略，自动适配中文 app 名称  
 - **安全防护** — 支付、下单等敏感操作自动拦截并请求确认  
 - **模块化架构** — 设备层抽象支持扩展到 Web、桌面等平台
@@ -43,9 +43,10 @@ python -m seetouch run "打开抖音我的喜欢里搜索跳舞的视频"
 - Python 3.10+
 - Android 设备（开启 USB 调试）或模拟器
 - ADB 工具
-- **推理模型**（二选一）：
-  - **Gemini API**（推荐）— 免费，无需信用卡，15 RPM / 500 RPD
-  - Doubao Vision — 火山引擎 API Key
+- 支持图像输入的推理 API：
+  - **OpenAI Chat Completions 兼容 API**（默认）
+  - Gemini API
+  - Doubao Vision
 
 ### 安装
 
@@ -83,33 +84,49 @@ pip install -e .
 
 ### 配置 API Key
 
-#### 方式 1: Gemini API（推荐，免费）
+#### 方式 1: OpenAI 兼容 API（默认）
 
-1. 前往 [Google AI Studio](https://aistudio.google.com) 获取免费 API Key
-2. 创建 `.env` 文件：
+创建 `.env` 文件：
 
 ```bash
 cp .env.example .env
 ```
 
-3. 编辑 `.env`：
+配置 API 地址、密钥和支持视觉输入的模型：
+
 ```ini
-# Gemini API (免费，15 RPM / 500 RPD)
-GEMINI_API_KEY=你的_Gemini_API_Key
-GEMINI_MODEL_ID=gemini-3.1-flash-lite  # 可选，默认即此模型
+OPENAI_API_KEY=你的_API_Key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL_ID=gpt-4.1-mini
+
+# 可选：模型支持 reasoning_effort 时选择思考强度
+# 留空表示不发送该参数，使用模型默认行为
+OPENAI_REASONING_EFFORT=medium  # minimal|low|medium|high|xhigh
 ```
 
-详细配置参考：[docs/gemini-integration.md](docs/gemini-integration.md)
+该配置同样适用于提供 OpenAI Chat Completions 兼容接口的其他服务。详细配置参考：
+[docs/openai-compatible.md](docs/openai-compatible.md)
 
-#### 方式 2: Doubao Vision
+#### 方式 2: Gemini API
 
 ```ini
-# 火山引擎 Doubao Vision
+GEMINI_API_KEY=你的_Gemini_API_Key
+GEMINI_MODEL_ID=gemini-3.1-flash-lite
+```
+
+运行时添加 `--reasoner gemini`。详细配置参考：
+[docs/gemini-integration.md](docs/gemini-integration.md)
+
+#### 方式 3: Doubao Vision
+
+```ini
 VLM_API_KEY=你的火山方舟_API_Key
 DOUBAO_MODEL_ID=doubao-seed-1-6-vision-250815
 DOUBAO_API_URL=https://ark.cn-beijing.volces.com/api/v3
 SEETOUCH_THINKING_MODE=enabled  # enabled|disabled
 ```
+
+运行时添加 `--reasoner doubao`。
 
 #### 可选配置
 
@@ -127,7 +144,7 @@ python -m seetouch.scripts.doctor
 
 ### 运行任务
 
-默认使用 Gemini（推荐）：
+默认使用 OpenAI 兼容 API：
 
 ```bash
 python -m seetouch run "打开抖音"
@@ -137,10 +154,11 @@ python -m seetouch run "在哔哩哔哩搜索采莲曲"
 指定推理模型：
 
 ```bash
-# 使用 Gemini（默认）
-python -m seetouch run "打开抖音" --reasoner gemini
+# 使用 OpenAI 兼容 API（默认）
+python -m seetouch run "打开抖音" --reasoner openai
 
-# 使用 Doubao
+# 使用 Gemini / Doubao
+python -m seetouch run "打开抖音" --reasoner gemini
 python -m seetouch run "打开抖音" --reasoner doubao
 ```
 
@@ -285,14 +303,19 @@ ruff format seetouch/
 
 ## 性能与成本
 
-### thinking_mode 对比
+### 思考强度
 
-| 模式 | 步均耗时 | 准确率 | 适用场景 |
-|------|---------|--------|---------|
-| `disabled` | 3-5s | 中 | 简单任务、成本敏感 |
-| `enabled` | 7-12s | 高 | 复杂场景（广告识别、小控件定位） |
+OpenAI 兼容后端通过 `OPENAI_REASONING_EFFORT` 选择思考强度：
 
-> 默认 `enabled`（准确率优先），可通过 `SEETOUCH_THINKING_MODE` 环境变量调整
+| 值 | 说明 |
+|---|---|
+| 留空 | 不发送 `reasoning_effort`，使用模型默认行为 |
+| `minimal` / `low` | 更低延迟和成本 |
+| `medium` | 平衡推理质量与速度 |
+| `high` / `xhigh` | 更强推理，通常更慢且消耗更多 token |
+
+并非所有兼容模型都支持全部档位；不支持时留空。Doubao 后端继续使用
+`SEETOUCH_THINKING_MODE=enabled|disabled|auto`。
 
 ---
 
@@ -300,7 +323,7 @@ ruff format seetouch/
 
 ### 已完成 ✓
 - [x] uiautomator2 设备控制层
-- [x] Doubao Vision 推理引擎
+- [x] OpenAI 兼容 / Gemini / Doubao 多推理后端
 - [x] 五级 OPEN 启动策略 + 视觉兜底
 - [x] 敏感动作拦截
 - [x] 死循环检测（连续 3 步相同动作自动中止）
@@ -308,7 +331,7 @@ ruff format seetouch/
 - [x] 图形化调试器（Web UI + 单步执行 + 实时截图标注）
 
 ### 进行中 🚧
-- [ ] 更多 VLM 后端支持（Claude、GPT-4V、本地模型）
+- [ ] 本地 VLM 后端
 - [ ] 多设备并行执行
 
 ### 未来计划 💡
@@ -343,7 +366,8 @@ ruff format seetouch/
 ## 致谢
 
 - [uiautomator2](https://github.com/openatx/uiautomator2) — Android 自动化核心
-- [Doubao Vision](https://www.volcengine.com/docs/82379/1298454) — 视觉理解引擎
+- [OpenAI Python SDK](https://github.com/openai/openai-python) — OpenAI 兼容 API 客户端
+- [Doubao Vision](https://www.volcengine.com/docs/82379/1298454) — 可选视觉理解引擎
 
 ---
 

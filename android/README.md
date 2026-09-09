@@ -14,7 +14,7 @@ app/src/main/java/com/seetouch/app/
 │   ├── TaskState.kt             # TaskStatus / StepInfo / TaskUiState
 │   ├── TaskController.kt        # 单例 StateFlow,Python 回调 → UI 状态
 │   └── TaskExecutionService.kt  # 前台 Service,承载任务线程
-├── settings/    # AppSettings(API key/模型/最大步数/thinking 开关)
+├── settings/    # AppSettings(API key/Base URL/模型/最大步数/思考强度)
 ├── device/      # SeeTouchAccessibilityService(手势注入/截图/前台包名)
 ├── bridge/      # DeviceBridge:Python↔Kotlin 唯一门面
 ├── appindex/    # 应用索引领域层(helper 与主 App 共用;OPEN L1.5 复用)
@@ -43,7 +43,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## 用法一：独立 App（不依赖电脑）
 
 1. 安装 APK 后，在系统设置 → 无障碍 中开启「SeeTouch」服务（App 内有跳转按钮）
-2. 打开 SeeTouch → 右上角齿轮进设置页，填入豆包 API key（可选：模型 ID、最大步数、深度思考开关），保存
+2. 打开 SeeTouch → 右上角齿轮进设置页，填写 OpenAI 兼容 API Key、Base URL、模型 ID，
+   按模型能力选择思考强度（不支持 `reasoning_effort` 时选“模型默认”），保存
 3. 回任务页输入自然语言指令（如「打开设置」「在哔哩哔哩搜索采莲曲」）→ 点「开始执行」
 4. App 自动回桌面开始执行；执行由前台 Service 承载，通知栏可见。回到 SeeTouch 可看实时步骤时间线；遇敏感动作（支付/删除等）会弹确认框，5 分钟未确认默认拒绝
 
@@ -114,5 +115,8 @@ App 内 OPEN 以**应用名**为一等公民（VLM 只输出桌面显示名，�
 adb shell am start -n com.seetouch.app/.diag.PythonSelfTestActivity
 # 无 UI 任务执行(logcat tag SEETOUCH_RUN)
 adb shell am start -n com.seetouch.app/.diag.TaskRunActivity \
-    --es instruction "打开设置" --es api_key "<DOUBAO_API_KEY>"
+    --es instruction "打开设置" \
+    --es api_key "<API_KEY>" \
+    --es base_url "https://api.openai.com/v1" \
+    --es model_id "gpt-4.1-mini"
 ```

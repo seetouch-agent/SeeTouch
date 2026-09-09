@@ -40,8 +40,8 @@ def run_task(
     Args:
         instruction:      用户任务指令
         config_json:      运行配置 JSON:
-                          {"api_key": 必填, "model_id"/"api_url"/"thinking_mode"/
-                           "max_steps": 可选(缺省取 seetouch 默认值)}
+                          {"api_key": 必填, "base_url"/"model_id"/
+                           "reasoning_effort"/"max_steps": 可选}
         step_callback:    每步结束回调 callback(step_json: str),供 Kotlin 侧展示进度
         confirm_callback: 敏感动作确认回调 callback(message: str) -> bool;
                           None 时默认拒绝(安全兜底)
@@ -62,15 +62,18 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback) -> str
     from seetouch.core.runner import Runner
     from seetouch.core.task import Task
     from seetouch.device.android_native.controller import NativeAndroidController
-    from seetouch.reasoning.doubao import DoubaoConfig, DoubaoReasoner
+    from seetouch.reasoning.openai_compatible import (
+        OpenAICompatibleConfig,
+        OpenAICompatibleReasoner,
+    )
     from seetouch.safety.guard import Guard
 
     runs_dir = os.path.join(str(DeviceBridge.filesDir()), "runs")
 
-    doubao_kwargs = {"api_key": config["api_key"]}
-    for key in ("model_id", "api_url", "thinking_mode"):
+    reasoner_kwargs = {"api_key": config["api_key"]}
+    for key in ("base_url", "model_id", "reasoning_effort"):
         if config.get(key):
-            doubao_kwargs[key] = config[key]
+            reasoner_kwargs[key] = config[key]
     max_steps = int(config.get("max_steps") or 45)
 
     def prompt(message: str) -> bool:
@@ -86,7 +89,7 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback) -> str
 
     runner = Runner(
         device=device,
-        reasoner=DoubaoReasoner(DoubaoConfig(**doubao_kwargs)),
+        reasoner=OpenAICompatibleReasoner(OpenAICompatibleConfig(**reasoner_kwargs)),
         guard=Guard(prompt_fn=prompt),
         runs_dir=runs_dir,
     )

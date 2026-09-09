@@ -76,8 +76,8 @@ response = model.generate_content([system_prompt, screenshot])
 # 2. 配置环境变量
 export GEMINI_API_KEY=your-api-key
 
-# 3. 运行任务（默认使用 Gemini）
-python -m seetouch run "打开抖音"
+# 3. 运行任务（显式选择 Gemini）
+python -m seetouch run "打开抖音" --reasoner gemini
 
 # 或显式指定
 python -m seetouch run "在哔哩哔哩搜索采莲曲" --reasoner gemini

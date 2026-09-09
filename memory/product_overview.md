@@ -64,10 +64,14 @@ metadata:
 
 ### reasoning/
 - `Reasoner` Protocol（抽象接口）
+- `OpenAICompatibleReasoner`（默认，任意 OpenAI Chat Completions 兼容视觉 API）
 - `DoubaoReasoner` 实现（火山引擎 Doubao-Seed-1.6-Vision）
-- 模型配置：thinking_mode（enabled/disabled/auto）、temperature、max_tokens
+- `GeminiReasoner` 实现（Google Gemini 原生 SDK）
+- OpenAI 兼容配置：API key、Base URL、模型 ID、reasoning_effort
+- Doubao 保留原生 thinking_mode（enabled/disabled/auto）
 
-**扩展点：** `openai.py`、`claude.py`、`local.py` 可接入其他多模态模型
+**扩展点：** 不需要为每个 OpenAI 兼容服务新增实现；非兼容协议或本地模型继续通过
+`Reasoner` Protocol 增加独立后端。
 
 ### perception/
 - 坐标转换（归一化 0-1000 ↔ 像素）
@@ -86,7 +90,10 @@ metadata:
 ## 核心能力
 
 ### 1. 多模态视觉理解
-- 使用 Doubao-Seed-1.6-Vision（支持 VisualCoT 视觉思维链）
+- 默认调用可配置的 OpenAI Chat Completions 兼容视觉模型
+- 可选 Gemini 和 Doubao-Seed-1.6-Vision 后端
+- OpenAI 兼容后端可选择 `minimal` / `low` / `medium` / `high` / `xhigh`
+  思考强度，留空时使用模型默认行为
 - 识别控件位置、文本内容、应用状态、广告/弹窗等
 - 输出归一化坐标（0-1000）+ 动作决策
 
@@ -145,12 +152,13 @@ VLM 只输出应用桌面显示名，不输出包名。详见 [[technical_decisi
 | 2026-07-05 | 调试器日志重复修复（LogBridge propagate 隔离） | 2c3a4bf |
 | 2026-07-05 | 调试器步骤渐进式渲染（截图即建页面，推理完填充，执行完收尾） | 31ca0d5 |
 | 2026-07-05 | android/ 工程落地 + helper APK 应用索引导出（Stage 1，模拟器验证通过） | 9ba950c, d1a0bdb |
+| 2026-09-09 | OpenAI 兼容 API 成为默认后端，支持可选思考强度 | - |
 
 ---
 
 ## 测试覆盖
 
-- 69 单元测试（parser、screen、app_launcher、guard、runner-with-mock、event_bus、log_bridge、runner_events）
+- 单元测试覆盖 parser、screen、app_launcher、guard、runner、reasoner、event_bus、log_bridge
 - 真机集成测试（Xiaomi rubens / Android 12 / 1440×3200 / 447 包）
 - 覆盖场景：OPEN 五级 fallback、视觉学习、死循环检测、敏感动作拦截
 

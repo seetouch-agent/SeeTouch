@@ -223,6 +223,23 @@ metadata:
 - **验证**（云端 Pixel 6 模拟器 / Android 14）: UI 全流程 "Open Clock" 3 步完成（OPEN→WAIT→COMPLETE），'时钟' 经 L1.5 命中 `com.google.android.deskclock` 免视觉兜底；时间线实时渲染、完成/中止状态、设置页读写均正常。PC 端 64 单测全绿。待真机（Xiaomi Android 12）回归。
 - **helper 模式保留**: AppListExportActivity 原样可用，同一 APK 双模式。
 
+### 2026-09-09：OpenAI 兼容 API 成为默认推理后端
+
+- **目标**：允许用户通过 API key、Base URL 和模型 ID 接入任意支持视觉输入的 OpenAI
+  Chat Completions 兼容服务，同时保留 Gemini 和 Doubao。
+- **Python**：
+  - 新增 `OpenAICompatibleReasoner`，复用既有 prompt、图像编码、历史摘要、动作解析、
+    `ActionOutput` 和 token 统计链路。
+  - 新增 reasoner factory，CLI 与调试器默认使用 `openai`，仍可显式选择 `doubao` /
+    `gemini`。
+  - `reasoning_effort` 支持 `minimal`、`low`、`medium`、`high`、`xhigh`；留空时不发送。
+- **Android**：
+  - 设置页新增 Base URL，thinking 开关升级为思考强度单选。
+  - Chaquopy 任务入口默认组装 OpenAI 兼容 reasoner。
+  - 读取旧 Doubao SharedPreferences key，并在旧配置未迁移时保留 Doubao 地址和模型默认值。
+- **兼容性决策**：Android 固定的 `openai==1.30.0` 通过 `extra_body` 发送
+  `reasoning_effort`，避免依赖较新 SDK 签名。
+
 ## 重大 bug 复盘
 
 ### 调试器不显示思维链（2026-06-26）

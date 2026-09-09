@@ -4,7 +4,8 @@
 
 ## 概述
 
-SeeTouch 现已集成 Google Gemini API，默认使用 **Gemini 3.1 Flash-Lite** 模型，完全免费且无需信用卡。
+SeeTouch 可选使用 Google Gemini API，Gemini 后端默认模型为
+**Gemini 3.1 Flash-Lite**。
 
 **为什么选择 Gemini？**
 - ✅ 完全免费，无需信用卡
@@ -63,13 +64,7 @@ GEMINI_MODEL_ID=gemini-3.1-flash-lite
 
 ### 4. 运行任务
 
-使用 Gemini 作为推理模型（默认）：
-
-```bash
-python -m seetouch run "在哔哩哔哩搜索采莲曲"
-```
-
-或显式指定：
+使用 Gemini 作为推理模型：
 
 ```bash
 python -m seetouch run "在哔哩哔哩搜索采莲曲" --reasoner gemini
@@ -193,11 +188,11 @@ A: 目前 GeminiReasoner 不支持类似 Doubao 的 `thinking_mode` 参数。Gem
 
 ### Q: 如何在调试器中使用 Gemini？
 
-A: 调试器会自动检测环境变量。启动调试器前设置 `GEMINI_API_KEY`：
+A: 启动调试器前设置 `GEMINI_API_KEY` 并指定 Gemini 后端：
 
 ```bash
 export GEMINI_API_KEY=your-api-key
-python -m seetouch debug
+python -m seetouch debug --reasoner gemini
 ```
 
 ### Q: 付费升级需要多少成本？

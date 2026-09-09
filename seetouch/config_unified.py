@@ -4,7 +4,7 @@
   - 配置集中:所有可配置参数归集到 UnifiedConfig
   - 优先级:环境变量 > .env 文件 > 默认值
   - 类型安全:使用 dataclass + 类型注解
-  - 向后兼容:保留旧的 AppSettings.from_env() 和 DoubaoConfig.from_env()
+  - 向后兼容:保留旧的 AppSettings.from_env() 和各 Reasoner 配置类
 """
 
 from __future__ import annotations
@@ -59,16 +59,16 @@ class UnifiedConfig:
 
     # ==================== 推理层 ====================
     vlm_api_key: str
-    """VLM API Key（火山方舟/Doubao）"""
+    """OpenAI 兼容 VLM API Key"""
 
     vlm_api_url: str
-    """VLM API 地址"""
+    """OpenAI 兼容 API 地址"""
 
     vlm_model_id: str
     """VLM 模型 ID"""
 
-    thinking_mode: str
-    """Doubao thinking 模式: enabled|disabled|auto"""
+    reasoning_effort: str | None
+    """思考强度: minimal|low|medium|high|xhigh; None 使用模型默认"""
 
     temperature: float | None
     """推理温度参数"""
@@ -91,10 +91,10 @@ class UnifiedConfig:
     def from_env(cls) -> "UnifiedConfig":
         """从环境变量加载配置,缺失值使用合理默认值。"""
         # VLM API Key 是必需的
-        api_key = os.environ.get("VLM_API_KEY") or os.environ.get("DOUBAO_API_KEY", "")
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("VLM_API_KEY", "")
         if not api_key:
             raise RuntimeError(
-                "missing VLM_API_KEY (or DOUBAO_API_KEY) environment variable"
+                "missing OPENAI_API_KEY (or VLM_API_KEY) environment variable"
             )
 
         return cls(
@@ -111,9 +111,12 @@ class UnifiedConfig:
             runs_dir=Path(os.environ.get("SEETOUCH_RUNS_DIR", "runs")),
             # 推理层
             vlm_api_key=api_key,
-            vlm_api_url=os.environ.get("DOUBAO_API_URL", "https://ark.cn-beijing.volces.com/api/v3"),
-            vlm_model_id=os.environ.get("DOUBAO_MODEL_ID", "doubao-seed-1-6-vision-250815"),
-            thinking_mode=os.environ.get("SEETOUCH_THINKING_MODE", "enabled"),
+            vlm_api_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            vlm_model_id=os.environ.get("OPENAI_MODEL_ID", "gpt-4.1-mini"),
+            reasoning_effort=_parse_reasoning_effort(
+                os.environ.get("OPENAI_REASONING_EFFORT")
+                or os.environ.get("SEETOUCH_REASONING_EFFORT")
+            ),
             temperature=_parse_float_or_none(os.environ.get("SEETOUCH_TEMPERATURE")),
             top_p=_parse_float_or_none(os.environ.get("SEETOUCH_TOP_P")),
             history_window=int(os.environ.get("SEETOUCH_HISTORY_WINDOW", "8")),
@@ -131,3 +134,9 @@ def _parse_float_or_none(s: str | None) -> float | None:
         return float(s)
     except ValueError:
         return None
+
+
+def _parse_reasoning_effort(s: str | None) -> str | None:
+    if not s or s.strip().lower() in {"none", "default"}:
+        return None
+    return s.strip().lower()
