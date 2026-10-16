@@ -19,7 +19,9 @@ from ..core.runner import Runner
 from ..core.task import Task
 from ..device.android.controller import AndroidController
 from ..logging_config import configure_logging
-from ..reasoning.factory import DEFAULT_REASONER, REASONER_NAMES, create_reasoner
+from ..reasoning.factory import (
+    DEFAULT_DEBUG_REASONER, DEFAULT_REASONER, REASONER_NAMES, create_reasoner,
+)
 from ..safety.guard import Guard
 
 
@@ -56,16 +58,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--reasoner",
         choices=REASONER_NAMES,
         default=DEFAULT_REASONER,
-        help="推理后端: openai(OpenAI 兼容,默认)、doubao 或 gemini",
+        help="推理模型选择: doubao、gemini(默认) 或 openai(支持兼容中转站)",
     )
 
     p_debug = sub.add_parser("debug", help="启动图形化调试器")
     p_debug.add_argument("--port", type=int, default=5000, help="调试器服务端口(默认 5000)")
     p_debug.add_argument(
-        "--reasoner",
-        choices=REASONER_NAMES,
-        default=DEFAULT_REASONER,
-        help="推理后端: openai(OpenAI 兼容,默认)、doubao 或 gemini",
+        "--reasoner", choices=REASONER_NAMES, default=DEFAULT_DEBUG_REASONER,
+        help="推理后端: doubao(默认)、gemini 或 openai",
     )
 
     return parser
@@ -83,6 +83,7 @@ def _cmd_run(args: argparse.Namespace, settings: AppSettings) -> int:
         print(f"[ERROR] init android device failed: {exc}", file=sys.stderr)
         return 1
 
+    # 根据参数选择推理模型
     try:
         reasoner = create_reasoner(args.reasoner)
         logger.info("using %s reasoner", args.reasoner)

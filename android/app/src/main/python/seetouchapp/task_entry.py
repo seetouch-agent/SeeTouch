@@ -56,24 +56,41 @@ def run_task(
         )
 
 
+def _create_reasoner(config: dict):
+    """Legacy configs stay on Doubao; credentials never cross providers implicitly."""
+    name = config.get("reasoner", "doubao")
+    if name == "doubao":
+        from seetouch.reasoning.doubao import DoubaoConfig, DoubaoReasoner
+
+        kwargs = {"api_key": config["api_key"]}
+        for key in ("model_id", "api_url", "thinking_mode"):
+            if config.get(key):
+                kwargs[key] = config[key]
+        return DoubaoReasoner(DoubaoConfig(**kwargs))
+    if name == "openai":
+        from seetouch.reasoning.openai import OpenAIConfig, OpenAIReasoner
+
+        if config.get("api_mode", "chat_completions") != "chat_completions":
+            raise ValueError("Android supports Chat Completions only")
+        kwargs = {"api_key": config["api_key"], "model_id": config.get("model_id", "")}
+        for key in ("base_url", "reasoning_effort"):
+            if config.get(key):
+                kwargs[key] = config[key]
+        return OpenAIReasoner(OpenAIConfig(**kwargs))
+    raise ValueError(f"Unsupported Android reasoner: {name}")
+
+
 def _run_task(instruction, config: dict, step_callback, confirm_callback) -> str:
     from com.seetouch.app.bridge import DeviceBridge  # type: ignore[import-not-found]
 
     from seetouch.core.runner import Runner
     from seetouch.core.task import Task
     from seetouch.device.android_native.controller import NativeAndroidController
-    from seetouch.reasoning.openai_compatible import (
-        OpenAICompatibleConfig,
-        OpenAICompatibleReasoner,
-    )
     from seetouch.safety.guard import Guard
 
     runs_dir = os.path.join(str(DeviceBridge.filesDir()), "runs")
 
-    reasoner_kwargs = {"api_key": config["api_key"]}
-    for key in ("base_url", "model_id", "reasoning_effort"):
-        if config.get(key):
-            reasoner_kwargs[key] = config[key]
+    reasoner = _create_reasoner(config)
     max_steps = int(config.get("max_steps") or 45)
 
     def prompt(message: str) -> bool:
@@ -89,7 +106,7 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback) -> str
 
     runner = Runner(
         device=device,
-        reasoner=OpenAICompatibleReasoner(OpenAICompatibleConfig(**reasoner_kwargs)),
+        reasoner=reasoner,
         guard=Guard(prompt_fn=prompt),
         runs_dir=runs_dir,
     )

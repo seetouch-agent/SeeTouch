@@ -7,7 +7,9 @@ metadata:
 
 # 开发历程
 
-更新时间：2026-07-05
+> 历史记录不是当前能力清单。当前入口差异、已知缺陷及验证状态以 [产品概览](product_overview.md) 和 [技术决策](technical_decisions.md) 为准。历史耗时/成功记录未在本轮重跑，不能作为当前模型或真机性能结论。
+
+更新时间：2026-10-12（历史里程碑保留当时语境）
 
 ---
 
@@ -83,7 +85,7 @@ metadata:
 
 ### 2026-06-17：提取为独立仓库
 
-- **仓库路径**: `D:\科研\phone-agent`
+- **仓库路径**: `<local-path>`
 - **默认分支**: `main`
 - **保留历史**: 3 个产品相关 commit（ccce867 / 73a9e41 / dde04ba）
 - **目录结构**: `seetouch/` 提到根目录
@@ -108,7 +110,7 @@ metadata:
 
 ### 2026-06-19：正式开源发布到 GitHub
 
-- **仓库地址**: https://github.com/YidaYang/SeeTouch
+- **仓库地址**: https://github.com/seetouch-agent/SeeTouch（现地址；最初发布于个人账号）
 - **开源协议**: Apache License 2.0（由 GitHub 自动生成）
 - **发布流程**: rebase 合并 GitHub 生成的 LICENSE commit → push
 - **项目介绍**: Vision-driven mobile GUI agent that sees your screen and operates your phone via natural language.
@@ -118,7 +120,7 @@ metadata:
 ### 2026-06-19：图形化调试器
 
 - **动机**: 之前只能命令行运行 + 看 log 调试，不直观且不支持单步执行
-- **commit**: `fc5c0e5`（feat 主体）→ `5500317`（修 Windows 启动崩溃）→ `f15c664`（修单步卡死）
+- **commit**: `99cdfd8`（feat 主体）→ `6be1ed1`（修 Windows 启动崩溃）→ `3b6399a`（修单步卡死）
 - **架构变更**:
   - Runner 从紧耦合 for 循环重构为 `start()` / `step()` / `run()` 状态机
   - `run()` 变成 `start() + 循环 step()` 的语法糖，CLI 行为完全不变
@@ -172,7 +174,7 @@ metadata:
 
 - **动机**: 调试器右侧日志面板中，相同的日志条目会显示两遍。
 - **根因**: `LogBridge` 把 `_EventBusLogHandler` 挂在 `seetouch` logger 上，但 Python logging 默认 `propagate=True`，同一条 LogRecord 会沿 logger 层级向上传播到 root logger。在 Flask-SocketIO `threading` async_mode 下，propagation 链路中的副作用（transport 层消息双发 / 回调重入）导致前端收到两份。
-- **修复（commit `2c3a4bf`）**:
+- **修复（commit `9798bf7`）**:
   - `LogBridge.install()` 时将 `seetouch` logger 的 `propagate` 设为 `False`，完全隔离日志链路
   - 同时在 `seetouch` logger 上挂一个 `StreamHandler`，保持 stderr 终端输出
   - `uninstall()` 时恢复 `propagate` 原始值并移除 `StreamHandler`
@@ -181,7 +183,7 @@ metadata:
 ### 2026-07-05：调试器步骤渐进式渲染
 
 - **动机**: 原先前端在整步执行完毕收到 `step_result` 后才创建步骤页面，推理期间（5-12 秒）信息面板还停留在上一步的数据，用户体验差。正确的逻辑应该是截图完成就新建步骤页面，显示截图和思考动画，推理完成后填充 prompt / 动作 / 思维链，执行完成后补充执行结果。
-- **变更（commit `31ca0d5`）**:
+- **变更（commit `6983231`）**:
   - `core/runner.py`：`STEP_REASONING_DONE` 事件扩展，新增 `prompt_text`、`raw_output`、`reasoning_content`、`screen_summary`、`action_summary`、`usage` 字段
   - `debugger/debug_session.py`：`_on_reasoning_done` 转发新增字段到前端
   - `debugger/static/app.js`：三阶段渐进渲染
@@ -198,7 +200,7 @@ metadata:
 ### 2026-07-05：helper APK 应用索引导出（Stage 1 落地）
 
 - **背景**: 用户本地 Android Studio 创建 `android/` Gradle 工程骨架（工程名 SeeTouch，为升级为独立主 App 预留），AGP 9.2.1 / Gradle 9.4.1 / compileSdk 36 / minSdk 26 / Kotlin（AGP 内置）。
-- **变更（commit `9ba950c` + `d1a0bdb`）**:
+- **变更（commit `4034e75` + `5f3d44f`）**:
   - `appindex/`：`AppEntry` / `AppIndexProvider`(抽象) / `PackageManagerAppIndexProvider`（queryIntentActivities(MAIN/LAUNCHER) + loadLabel，distinctBy package）/ `AppIndexJson`（schema_version=1）
   - `export/`：可插拔通道 —— `FileAppIndexExporter`（tmp→rename+.done 标记）、`LogcatAppIndexExporter`（base64 分块，tag `SEETOUCH_APPLIST`）
   - `helper/AppListExportActivity`：exported 透明 Activity，ADB `am start` 触发，文件通道失败自动兜底 logcat
@@ -213,32 +215,29 @@ metadata:
 
 用户确认三项决策：① Chaquopy 混合方案 ② minSdk 26→30（用 `AccessibilityService.takeScreenshot`，免 MediaProjection）③ 必要时可降 AGP（实际无需，Chaquopy 17.0 官方支持 AGP 9.2）。
 
-- **Phase 0 技术验证（commit `86350d2`）**: Chaquopy 17.0 嵌入 CPython 3.12；`sourceSet.srcDir` 直接指向仓库根 `seetouch/`（Python 更新→重新构建即同步，零移植）；pip: openai 1.30.0 / pydantic 1.10.22 / httpx 0.27.2 / pillow。模拟器自检全绿 + 真实 Doubao 推理跑通。APK ~54MB。
-- **Phase 1 设备层闭环（commit `741d8cf`）**: `device/SeeTouchAccessibilityService`（dispatchGesture 点击滑动 / takeScreenshot / ACTION_SET_TEXT 中文输入 / 前台包名跟踪）+ `bridge/DeviceBridge`（Python↔Kotlin 唯一门面，全静态方法）+ `seetouch/device/android_native/controller.py`（实现 DeviceController Protocol）。无 UI 跑通"打开设置"2 步端到端。
+- **Phase 0 技术验证（commit `555b6d9`）**: Chaquopy 17.0 嵌入 CPython 3.12；复用仓库根 `seetouch/`（当前实现改由 Gradle Sync 复制到构建目录，再交给 sourceSet；Python 更新后重新构建同步）；pip: openai 1.30.0 / pydantic 1.10.22 / httpx 0.27.2 / pillow。模拟器自检全绿 + 真实 Doubao 推理跑通。APK ~54MB。
+- **Phase 1 设备层闭环（commit `21647e9`）**: `device/SeeTouchAccessibilityService`（dispatchGesture 点击滑动 / takeScreenshot / ACTION_SET_TEXT 中文输入 / 前台包名跟踪）+ `bridge/DeviceBridge`（Python↔Kotlin 唯一门面，全静态方法）+ `seetouch/device/android_native/controller.py`（实现 DeviceController Protocol）。无 UI 跑通"打开设置"2 步端到端。
   - **坑 1**: Chaquopy 里 `java.util.List` 不可迭代 → DeviceBridge 返回 `Array<String>`
   - **坑 2**: `go_home()` 返回时窗口事件未到，`current_app()` 读到旧前台 → 视觉兜底 baseline 误学 launcher 包名；`go_home()` 后加 0.6s sleep
-- **Phase 2 Compose UI + 前台 Service（commit `90d6006`）**: `task/TaskController`（单例 StateFlow<TaskUiState>，Python step/confirm 回调 → UI）、`task/TaskExecutionService`（前台服务 specialUse 子类型，任务线程）、`ui/MainActivity`（任务输入 + 实时步骤时间线 + 敏感动作确认弹窗(5 分钟超时默认拒绝) + 设置页）、`settings/AppSettings`（API key/模型 ID/最大步数/thinking 开关，与 PC 端 .env 可配置项对齐）。`run_task` 改为 config JSON 传参。
+- **Phase 2 Compose UI + 前台 Service（commit `9a7e74a`）**: `task/TaskController`（单例 StateFlow<TaskUiState>，Python step/confirm 回调 → UI）、`task/TaskExecutionService`（前台服务 specialUse 子类型，任务线程）、`ui/MainActivity`（任务输入 + 实时步骤时间线 + 敏感动作确认弹窗(5 分钟超时默认拒绝) + 设置页）、`settings/AppSettings`（API key/模型 ID/最大步数/thinking 开关，与 PC 端 .env 可配置项对齐）。`run_task` 改为 config JSON 传参。
   - **关键发现**: agent 与手机同机运行，任务启动时首张截图是 SeeTouch 自己的界面，模型误判"应用正在处理"反复 WAIT 直到 stuck_loop 中止 → `task_entry` 在 runner 启动前先 `go_home()`
-- **Phase 3 OPEN 接入 on-device 应用索引（commit `636df1c`）**: `AppLauncher` 新增可选 `label_resolver` 注入点（L1.5，仅精确匹配禁止模糊）；`DeviceBridge.packageForLabel` 复用 helper 的 `PackageManagerAppIndexProvider` 按显示名 trim+忽略大小写匹配。OPEN 层级变为 learned → L1 表 → L1' alias → **L1.5 label** → L2 直通 → L4 视觉兜底。
+- **Phase 3 OPEN 接入 on-device 应用索引（commit `2854f2a`）**: `AppLauncher` 新增可选 `label_resolver` 注入点（L1.5，仅精确匹配禁止模糊）；`DeviceBridge.packageForLabel` 复用 helper 的 `PackageManagerAppIndexProvider` 按显示名 trim+忽略大小写匹配。OPEN 层级变为 learned → L1 表 → L1' alias → **L1.5 label** → L2 直通 → L4 视觉兜底。
 - **验证**（云端 Pixel 6 模拟器 / Android 14）: UI 全流程 "Open Clock" 3 步完成（OPEN→WAIT→COMPLETE），'时钟' 经 L1.5 命中 `com.google.android.deskclock` 免视觉兜底；时间线实时渲染、完成/中止状态、设置页读写均正常。PC 端 64 单测全绿。待真机（Xiaomi Android 12）回归。
 - **helper 模式保留**: AppListExportActivity 原样可用，同一 APK 双模式。
 
-### 2026-09-09：OpenAI 兼容 API 成为默认推理后端
+## 2026-09 至 2026-10：当前主线同步
 
-- **目标**：允许用户通过 API key、Base URL 和模型 ID 接入任意支持视觉输入的 OpenAI
-  Chat Completions 兼容服务，同时保留 Gemini 和 Doubao。
-- **Python**：
-  - 新增 `OpenAICompatibleReasoner`，复用既有 prompt、图像编码、历史摘要、动作解析、
-    `ActionOutput` 和 token 统计链路。
-  - 新增 reasoner factory，CLI 与调试器默认使用 `openai`，仍可显式选择 `doubao` /
-    `gemini`。
-  - `reasoning_effort` 支持 `minimal`、`low`、`medium`、`high`、`xhigh`；留空时不发送。
-- **Android**：
-  - 设置页新增 Base URL，thinking 开关升级为思考强度单选。
-  - Chaquopy 任务入口默认组装 OpenAI 兼容 reasoner。
-  - 读取旧 Doubao SharedPreferences key，并在旧配置未迁移时保留 Doubao 地址和模型默认值。
-- **兼容性决策**：Android 固定的 `openai==1.30.0` 通过 `extra_body` 发送
-  `reasoning_effort`，避免依赖较新 SDK 签名。
+- `2cd8e2f`：统一异常类型；后续仍有兼容回归。
+- `9422ab1`：加入 GeminiReasoner，CLI run 默认 Gemini；debug 和 Android App 未同步切换。
+- `8f1b51b` / `2e312f8`：修复 OpenApp 异常字段和 ParseError 构造等回归。
+- `554c0e3` / `de755f7`：更新迁移至 seetouch-agent 的仓库链接并合并远程 main。
+- 2026-10-12 实测：`python -m pytest tests -q` 为 88 passed；`ruff check seetouch` 通过。扩展 lint 到 tests/scripts 时有 4 项既存问题。
+- 本次仅核对源码、文档、离线测试和隐私信息；没有重跑真实 API、手机任务或 APK 构建。
+- 核对发现 API 异常返回 COMPLETE、debug 自动批准等限制；详见当前技术决策与路线图，尚未因本轮文档修改而修复。
+- 按维护者授权统一两个公开分支的历史作者/提交者为其 GitHub 账号及 noreply 邮箱，移除 AI 联合署名，保留代码树和时间戳；下列历史提交编号同步替换为改写后的编号。
+- 隐私审计区分了公开提交邮箱/历史本机路径与仅本地 Cline checkpoint 中的凭据匹配。未观察到该凭据进入当前远程分支/标签历史；详情见 [审计记录](../docs/privacy-audit.md)。
+
+---
 
 ## 重大 bug 复盘
 
@@ -248,7 +247,7 @@ metadata:
 
 **根因（非显然）：** Doubao thinking 开启后，思维链放在 `response.choices[0].message.reasoning_content` 这个**独立字段**，**不在** `message.content` 里。`DoubaoReasoner._extract_response_text` 只读 `content`，所以思维链在数据进入系统的第一步就被丢弃——不是前端没渲染，是后端根本没拿到。
 
-**修复（commit `c84f935`，端到端 6 处，沿用 BACK/prompt_text 链路模式）：**
+**修复（commit `97e8b84`，端到端 6 处，沿用 BACK/prompt_text 链路模式）：**
 - `doubao.py`：新增 `_extract_reasoning_content()` 从 `message.reasoning_content` 提取
 - `action.py`：`ActionOutput` 加 `reasoning_content` 字段（默认 `""`，不破坏旧构造）
 - `runner.py`：4 处 `StepResult` 构造透传
@@ -273,7 +272,7 @@ metadata:
 3. 前端 `step_result` 处理器仅在 `terminal` 时才 `updateState`，非终止步不更新 → 前端永远停在 `stepping`，按钮永久卡死
 4. 用户被迫只能 Stop，而 Stop 会 `debug_session = None` 拆掉会话 → 误以为"记录丢了"
 
-**修复（commit `f15c664`）：**
+**修复（commit `3b6399a`）：**
 - DebugSession 新增 `on_state_change` 回调 + `_set_state()` 方法（释放锁后再触发回调，避免死锁）
 - worker 所有后台状态转换（`stepping→paused` / `→finished` / 异常兜底 / `finally`）统一经 `_set_state()` 推送 `status`
 - app.py 注册 `on_state_change → socketio.emit("status")`
@@ -353,7 +352,7 @@ metadata:
 **观察：**
 - 步均 7-12s，比 disabled 慢 2-3 倍
 - 识别准确率明显提高（B 站开屏广告自动跳过、复杂搜索场景不再瞎点）
-- B 站任务有 step 重复（4-5 重复点搜索框，7-8 重复点搜索按钮）—— 模型保险性重复，任务能完成但低效
+- B 站任务有 step 重复（4-5 重复点搜索框，7-8 重复点搜索按钮）—— 当时归因为模型保险性重复；后续 settle delay 排查发现旧画面也是重要原因，不能归结为模型特性
 
 **优化方向：** Prompt 可加"刚才点过的位置不用再点，等待页面响应，不响应再 WAIT"。
 
@@ -417,10 +416,10 @@ metadata:
 ## 首次本地 APK 编译（2026-07-06）
 
 - **构建环境**:
-  - Android Studio: `D:\Programs\Android\Android Studio`（内含 JBR/JDK 21.0.10）
-  - Android SDK: `C:\Users\Danny\AppData\Local\Android\Sdk`（Platform 36.1 + Build-Tools 36/37）
-  - Gradle 9.4.1（wrapper）+ Chaquopy 16.x（CPython 3.12 嵌入）
-- **踩坑（commit `4f3f59c`）**: 项目路径 `D:\科研\` 含中文，AGP 默认拒绝非 ASCII 路径。修复：`gradle.properties` 加 `android.overridePathCheck=true`
+  - Android Studio: `<local-path>`（内含 JBR/JDK 21.0.10）
+  - Android SDK: `<local-path>`（Platform 36.1 + Build-Tools 36/37）
+  - Gradle 9.4.1（wrapper）；早期笔记中的 Chaquopy 16.x 记录与现配置不一致，2026-10-12 核对为 17.0.0（CPython 3.12）
+- **踩坑（commit `079c5e3`）**: 项目路径 `<local-path>` 含中文，AGP 默认拒绝非 ASCII 路径。修复：`gradle.properties` 加 `android.overridePathCheck=true`
 - **首次构建耗时**: ~6 分钟（下载 Chaquopy CPython 3.12 运行时 + pip 依赖 openai/pydantic/httpx/pillow，arm64-v8a 和 x86_64 双 ABI）
 - **产物**: `android/app/build/outputs/apk/debug/app-debug.apk`（65.7 MB，含 CPython）
 - **环境变量**: 已配置用户级 `JAVA_HOME`、`ANDROID_HOME`，并将 platform-tools / Studio JDK bin 加入 PATH

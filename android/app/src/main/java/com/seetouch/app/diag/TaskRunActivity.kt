@@ -12,7 +12,7 @@ import kotlin.concurrent.thread
  *
  *   adb shell am start -n com.seetouch.app/.diag.TaskRunActivity \
  *       --es instruction "打开设置" --es api_key "<API_KEY>" \
- *       --es base_url "https://api.openai.com/v1" --es model_id "gpt-4.1-mini"
+ *       --es reasoner "openai" --es base_url "https://api.openai.com/v1" --es model_id "<MODEL_ID>"
  *
  * 前置条件:已在系统设置中启用 SeeTouch 无障碍服务。
  * 每步进度与最终结果打到 logcat tag SEETOUCH_RUN。
@@ -24,12 +24,15 @@ class TaskRunActivity : Activity() {
         val instruction = intent.getStringExtra("instruction") ?: "打开设置"
         val apiKey = intent.getStringExtra("api_key").orEmpty()
         val configJson = JSONObject()
+            .put("reasoner", intent.getStringExtra("reasoner") ?: "doubao")
             .put("api_key", apiKey)
             .put(
                 "base_url",
                 intent.getStringExtra("base_url") ?: "https://api.openai.com/v1",
             )
-            .put("model_id", intent.getStringExtra("model_id") ?: "gpt-4.1-mini")
+            .put("api_url", intent.getStringExtra("api_url").orEmpty())
+            .put("model_id", intent.getStringExtra("model_id").orEmpty())
+            .put("thinking_mode", intent.getStringExtra("thinking_mode") ?: "enabled")
             .put("reasoning_effort", intent.getStringExtra("reasoning_effort").orEmpty())
             .put("max_steps", intent.getIntExtra("max_steps", 20))
             .toString()

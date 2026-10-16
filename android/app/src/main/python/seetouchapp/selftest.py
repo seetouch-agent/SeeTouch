@@ -2,7 +2,7 @@
 
 分两级:
 1. 离线检查 —— seetouch 各层模块可导入、PIL 图像编码链路可用
-2. 在线检查(需 api_key)—— OpenAICompatibleReasoner 对假截图做一次真实推理,
+2. 在线检查(需 api_key)—— 所选后端对假截图做一次真实推理，默认仍为豆包,
    覆盖 openai SDK / HTTPS / 输出解析全链路
 """
 
@@ -16,8 +16,9 @@ import traceback
 
 def run(
     api_key: str = "",
-    base_url: str = "https://api.openai.com/v1",
-    model_id: str = "gpt-4.1-mini",
+    base_url: str = "",
+    model_id: str = "",
+    reasoner: str = "doubao",
 ) -> str:
     """执行自检,返回 JSON 报告字符串。"""
     report: dict = {
@@ -39,11 +40,11 @@ def run(
     check("parser", _check_parser)
     if api_key:
         check(
-            "openai_compatible_inference",
-            lambda: _check_openai_compatible_inference(api_key, base_url, model_id),
+            "model_inference",
+            lambda: _check_inference(api_key, base_url, model_id, reasoner),
         )
     else:
-        checks["openai_compatible_inference"] = {
+        checks["model_inference"] = {
             "ok": None,
             "detail": "skipped (no api_key)",
         }
@@ -55,9 +56,9 @@ def run(
 def _check_import_core() -> str:
     from seetouch.core.runner import Runner  # noqa: F401
     from seetouch.core.action import ActionOutput  # noqa: F401
-    from seetouch.reasoning.openai_compatible import (  # noqa: F401
-        OpenAICompatibleConfig,
-        OpenAICompatibleReasoner,
+    from seetouch.reasoning.openai import (  # noqa: F401
+        OpenAIConfig,
+        OpenAIReasoner,
     )
     from seetouch.perception.screen import encode_image_data_url  # noqa: F401
     from seetouch.safety.guard import Guard  # noqa: F401
@@ -91,25 +92,20 @@ def _check_parser() -> str:
     return f"parsed sample output -> {action.type}"
 
 
-def _check_openai_compatible_inference(
+def _check_inference(
     api_key: str,
     base_url: str,
     model_id: str,
+    reasoner_name: str = "doubao",
 ) -> str:
     from PIL import Image
 
-    from seetouch.reasoning.openai_compatible import (
-        OpenAICompatibleConfig,
-        OpenAICompatibleReasoner,
-    )
+    from .task_entry import _create_reasoner
 
-    reasoner = OpenAICompatibleReasoner(
-        OpenAICompatibleConfig(
-            api_key=api_key,
-            base_url=base_url,
-            model_id=model_id,
-        )
-    )
+    reasoner = _create_reasoner({
+        "reasoner": reasoner_name, "api_key": api_key, "model_id": model_id,
+        "base_url": base_url, "api_url": base_url, "thinking_mode": "disabled",
+    })
     screenshot = Image.new("RGB", (1080, 2400), (32, 32, 32))
     output = reasoner.predict("这是一张纯色测试图,请直接输出 COMPLETE 动作", screenshot, [])
     if output.raw_output.startswith("Error:"):

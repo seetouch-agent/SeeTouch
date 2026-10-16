@@ -1,22 +1,17 @@
 # SeeTouch 项目记忆索引
 
-本项目是 Android 真机 GUI Agent 产品，通过 Vision-Language Model + uiautomator2 实现自然语言控制手机操作。
+更新时间：2026-10-12；代码核对基线：`de755f7`。
 
----
+SeeTouch 是截图驱动的 Android GUI Agent，有 PC CLI、Web 调试器及 Kotlin/Chaquopy 独立 Android App。CLI 默认 Gemini；调试器和 App 当前仍为 Doubao。主仓库为 [seetouch-agent/SeeTouch](https://github.com/seetouch-agent/SeeTouch)。
 
-## 核心记忆文件
+## 阅读顺序
 
-- [product_overview.md](product_overview.md) — 产品定位、技术架构、核心设计决策
-- [technical_decisions.md](technical_decisions.md) — 关键技术选型、OPEN 启动策略、视觉兜底机制
-- [development_history.md](development_history.md) — 开发历程、真机验证结果、重要 bug 复盘
-- [collaboration_style.md](collaboration_style.md) — 协作偏好、代码风格、工作流程约定
-- [future_roadmap.md](future_roadmap.md) — 产品路线图、待解决问题、扩展方向
+1. [产品概览](product_overview.md)：当前已实现能力、入口差异和验证边界。
+2. [协作约定](collaboration_style.md)：工作方式与授权边界。
+3. [技术决策](technical_decisions.md)：实际接口、配置、错误路径和历史经验。
+4. [路线图](future_roadmap.md)：未完成项，不能当成已有功能。
+5. [开发历程](development_history.md)：按当时版本记录的里程碑；不替代当前代码。
 
----
+用户操作以 [README](../README.md)、[Android 指南](../android/README.md) 和 [Gemini 指南](../docs/gemini-integration.md) 为准。隐私处理边界见 [审计记录](../docs/privacy-audit.md)。
 
-## 记忆使用指南
-
-- 新启动会话时优先阅读 `product_overview.md` 和 `collaboration_style.md`
-- 技术决策前查阅 `technical_decisions.md` 避免重复踩坑
-- 遇到问题时参考 `development_history.md` 查看历史解决方案
-- 记忆按主题分类，单个文件保持聚焦，通过 `[[filename]]` 交叉引用
+记忆是上下文而非实时状态。历史测试数量、时延、模型能力和机器环境在复用前应核实；不得将计划、静态配置、mock 测试通过写成真机或云端服务成功。公开记忆不保存凭据、个人邮箱或个人电脑绝对路径。

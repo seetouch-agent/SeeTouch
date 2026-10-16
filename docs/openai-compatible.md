@@ -1,62 +1,42 @@
 # OpenAI 兼容 API 配置指南
 
-SeeTouch 默认通过 OpenAI Chat Completions 协议调用多模态模型。只要服务实现兼容的
-`/chat/completions` 接口并支持 `image_url` 输入，就可以通过修改配置接入。
+CLI、Web 调试器和 Android App 共用 `OpenAIReasoner`。CLI 默认 Gemini，调试器和 Android 默认 Doubao；使用兼容接口需要显式选择后端。
 
-## 配置
+## PC 配置
 
-```ini
-OPENAI_API_KEY=your-api-key
+PC 依赖 `openai>=1.66.0`。更新源码后执行 `python -m pip install -e .` 同步依赖。
+
+```dotenv
+OPENAI_API_KEY=replace-with-your-key
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL_ID=gpt-4.1-mini
+OPENAI_MODEL_ID=replace-with-your-vision-model-id
+OPENAI_API_MODE=chat_completions
+OPENAI_REASONING_EFFORT=
+OPENAI_TIMEOUT=60
+OPENAI_MAX_RETRIES=1
 ```
 
-- `OPENAI_API_KEY`：API 密钥，也可使用兼容变量 `VLM_API_KEY`
-- `OPENAI_BASE_URL`：服务的 API 根地址，不要包含 `/chat/completions`
-- `OPENAI_MODEL_ID`：服务提供的、支持视觉输入的模型 ID
-
-运行：
-
-```bash
-python -m seetouch run "打开设置"
+```shell
 python -m seetouch run "打开设置" --reasoner openai
 python -m seetouch debug --reasoner openai
 ```
 
+本后端仅读取 `OPENAI_API_KEY`，不回退使用 `VLM_API_KEY` 或豆包凭据。Base URL 不包含 `/chat/completions` 或 `/responses` 后缀。仅支持 Responses 的服务可设置 `OPENAI_API_MODE=responses`。
+
 ## 思考强度
 
-模型支持 OpenAI `reasoning_effort` 参数时，可配置：
+`OPENAI_REASONING_EFFORT` 留空或填 `default` 时不发送参数。可显式填写模型支持的 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`；`none` 表示请求关闭推理，而不是使用默认值。服务端是否接受这些值取决于所选模型。
 
-```ini
-OPENAI_REASONING_EFFORT=medium
-```
+Chat Completions 通过 `reasoning_effort` 传递，Responses 通过 `reasoning.effort` 传递。豆包的 `thinking` 开关仍由豆包适配器处理，两者不互相转换。
 
-可选值为 `minimal`、`low`、`medium`、`high`、`xhigh`。留空或设置为 `default`
-时不发送该参数，由模型决定默认行为。不同服务和模型支持的档位可能不同；若接口返回
-参数不支持错误，应留空或改用该模型支持的值。
+## Android
 
-## 编程接口
+设置页选择 OpenAI 兼容接口后填写对应的 key、Base URL 和模型 ID。各后端独立存储凭据；切换后端不会自动复制 key。旧版本豆包配置与 thinking 设置继续有效。
 
-```python
-from seetouch.reasoning.openai_compatible import (
-    OpenAICompatibleConfig,
-    OpenAICompatibleReasoner,
-)
+APK 保留 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，只支持 Chat Completions。未安装 Gemini SDK，不提供 Gemini 后端或 Responses 模式。
 
-reasoner = OpenAICompatibleReasoner(
-    OpenAICompatibleConfig(
-        api_key="your-api-key",
-        base_url="https://provider.example/v1",
-        model_id="vision-model",
-        reasoning_effort="medium",
-    )
-)
-```
+## 失败与验证边界
 
-响应中的 `message.reasoning_content` 或 `message.reasoning` 会透传到运行记录和调试器；
-token 统计同时保留 `reasoning_tokens`。
+OpenAI 后端的 API 异常、空文本和截断输出会让 Runner 中止并记录 `completed=False`；输出格式解析失败会等待后重试。模型声明 COMPLETE 仍不代表经过独立验证的任务成功。
 
-## Android App
-
-设置页默认使用 OpenAI 兼容 API，可填写 API Key、Base URL、模型 ID，并选择模型默认
-或极低、低、中、高、极高思考强度。模型不支持 `reasoning_effort` 时选择“模型默认”。
+截图、任务和历史摘要会发送到所选服务。调试器原有的访问控制及自动批准敏感操作限制仍存在，见主 README。

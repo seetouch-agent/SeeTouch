@@ -1,222 +1,77 @@
 # 贡献指南
 
-感谢你考虑为 SeeTouch 贡献代码！
+欢迎为 SeeTouch 提交问题、文档或代码改进。当前主仓库为 [seetouch-agent/SeeTouch](https://github.com/seetouch-agent/SeeTouch)。
 
----
+## 报告问题
 
-## 贡献方式
+在 [Issues](https://github.com/seetouch-agent/SeeTouch/issues) 中说明版本或 commit、使用入口（CLI / 调试器 / Android App）、模型配置、复现步骤、预期和实际结果。设备信息提供型号和 Android 版本即可，不必公开设备序列号、完整应用列表或个人目录。
 
-### 报告 Bug
+分享日志前移除 API key、邮箱、账号、聊天内容和敏感截图。不要上传 `.env`、签名密钥、完整 `runs/` 或未经检查的应用索引。`completed=true` 只是当前程序状态，须结合截图和实际任务结果判断。
 
-在 [GitHub Issues](https://github.com/YidaYang/seetouch/issues) 提交 Bug 报告时，请包含：
+## 开发流程
 
-- **环境信息**：Python 版本、操作系统、手机型号/Android 版本
-- **复现步骤**：详细的操作流程
-- **期望行为** vs **实际行为**
-- **日志输出**：`./runs/<timestamp>/` 目录下的日志文件
-- **截图**（如适用）
+1. Fork 仓库，然后克隆自己的 fork：
 
-### 功能建议
-
-提交功能请求时，请说明：
-- **使用场景**：解决什么问题
-- **预期效果**：希望如何使用
-- **替代方案**（如果有）
-
-### 提交代码
-
-1. **Fork 仓库**  
-   点击右上角 Fork 按钮
-
-2. **克隆到本地**
    ```bash
-   git clone https://github.com/YidaYang/seetouch.git
+   git clone https://github.com/YOUR_USERNAME/SeeTouch.git seetouch
    cd seetouch
+   git remote add upstream https://github.com/seetouch-agent/SeeTouch.git
+   git switch -c docs/update-guide
    ```
 
-3. **创建分支**  
-   使用语义化分支名：
+2. 建立虚拟环境，按 [README](README.md) 激活，然后安装：
+
    ```bash
-   git checkout -b feature/add-web-controller
-   git checkout -b fix/open-app-crash
-   git checkout -b docs/improve-readme
+   python -m pip install -e ".[dev,debugger]"
    ```
 
-4. **安装开发环境**
+3. 修改后运行相关检查：
+
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # Windows: .\.venv\Scripts\Activate.ps1
-   pip install -e ".[dev]"
+   python -m pytest tests -q
+   python -m ruff check seetouch
+   git diff --check
    ```
 
-5. **编写代码**  
-   - 遵循现有代码风格
-   - 添加必要的测试
-   - 更新文档（如适用）
+   `tests/` 是当前维护的测试入口，`seetouch/tests/` 中仍有旧测试，不能混为同一套验证。需要查格式时可运行 `python -m ruff format --check seetouch`；不要为小修改批量格式化无关代码。
 
-6. **运行测试**
-   ```bash
-   # 代码检查
-   ruff check seetouch/
-   ruff format seetouch/
+4. 审阅 diff 后提交，推送到自己的分支并创建 PR。提交信息保持简洁，例如 `docs: 更新 Android 构建说明`。
 
-   # 单元测试
-   pytest tests/ -v
+2026-10-12 基线验证：88 项 Python 测试通过，`ruff check seetouch` 通过；包含 tests/scripts 的更广 lint 检查仍有 4 项既存问题。新增代码应有针对性验证，不用文档改动掩盖已有失败。
 
-   # 覆盖率
-   pytest --cov=seetouch --cov-report=term-missing
-   ```
+## 接口与分层
 
-7. **提交更改**  
-   使用规范的 commit message：
-   ```bash
-   git add .
-   git commit -m "feat: add web controller support"
-   git commit -m "fix: resolve OPEN app crash on MIUI"
-   git commit -m "docs: update installation guide"
-   ```
+- `device/` 负责设备交互，遵循 `DeviceController` Protocol；PC 和 Android 原生实现分别位于 `android/` 与 `android_native/`。
+- `reasoning/` 负责模型调用，遵循 `Reasoner.predict(instruction, screenshot, history) -> ActionOutput`。
+- `perception/screen.py` 负责图像和坐标；坐标范围为 0–1000。
+- `core/` 负责执行、记录和事件；`safety/` 负责关键词确认机制。
+- Android 修改应保持 `DeviceBridge` 边界，构建通过 Sync 任务复用仓库根的 Python 包。
 
-   **Commit 类型**：
-   - `feat`: 新功能
-   - `fix`: Bug 修复
-   - `docs`: 文档更新
-   - `test`: 测试相关
-   - `refactor`: 代码重构
-   - `perf`: 性能优化
-   - `chore`: 构建/工具链更新
+新增推理器的最小接口示例（仅展示结构，未实现模型调用）：
 
-8. **推送分支**
-   ```bash
-   git push origin feature/add-web-controller
-   ```
-
-9. **创建 Pull Request**  
-   在 GitHub 上点击 "New Pull Request"，填写：
-   - **标题**：简明扼要（如 commit message）
-   - **描述**：
-     - 解决了什么问题（关联 Issue 编号）
-     - 如何解决的（关键设计决策）
-     - 测试覆盖（真机验证/单元测试通过情况）
-     - 截图/演示（如适用）
-
----
-
-## 代码规范
-
-### Python 风格
-
-- 遵循 PEP 8（由 Ruff 自动检查）
-- 使用类型注解（`from __future__ import annotations`）
-- 函数/类添加 docstring（Google 风格）
-
-示例：
 ```python
-def normalize_point(x: int, y: int, width: int, height: int) -> tuple[int, int]:
-    """将像素坐标归一化到 0-1000 区间。
+from PIL import Image
+from seetouch.core.action import ActionOutput
+from seetouch.reasoning.base import StepRecord
 
-    Args:
-        x: 像素 x 坐标
-        y: 像素 y 坐标
-        width: 屏幕宽度
-        height: 屏幕高度
-
-    Returns:
-        (归一化 x, 归一化 y) 元组
-    """
-    return int(x * 1000 / width), int(y * 1000 / height)
+class CustomReasoner:
+    def predict(
+        self, instruction: str, screenshot: Image.Image, history: list[StepRecord]
+    ) -> ActionOutput:
+        raise NotImplementedError("接入模型并返回 ActionOutput")
 ```
 
-### 测试要求
+解析器入口为 `parse_model_output(text, image_size)`，返回 `Action`；失败抛出 `ParseError`。降级到 WAIT 由 Reasoner 完成，不是 parser 自己返回完成或等待动作。
 
-- 新功能必须包含单元测试
-- 测试文件放在 `tests/` 目录，命名为 `test_<module>.py`
-- 使用 pytest fixtures 复用测试环境
-- Mock 外部依赖（VLM API、设备控制）
+## 验证与 PR 描述
 
-示例：
-```python
-import pytest
-from seetouch.core.action import Action, parse_action
+先说明问题和改动后的行为，再列出实际执行的验证。涉及真机时写清入口、设备型号、任务、步数和人工观察结果。日志摘要文件是 `runs/<task_id>/summary.json`，不是 `report.json`。
 
-def test_parse_click_action():
-    result = parse_action('{"action": "CLICK", "parameters": {"point": [500, 300]}}')
-    assert result.action == "CLICK"
-    assert result.parameters["point"] == [500, 300]
+不要在普通单元测试里调用真实 API 或操作已连接手机。API 错误误记完成、调试器自动批准、Android 凭据存储等现有缺口见 [路线图](memory/future_roadmap.md)。
 
-def test_parse_invalid_action_fallback_to_wait():
-    result = parse_action('{"action": "INVALID"}')
-    assert result.action == "WAIT"  # fallback
-```
+## 文档、隐私与许可证
 
-### 模块化设计
-
-新增功能时遵循现有分层：
-
-- **device/** — 设备控制（Android / Web / Desktop）
-- **reasoning/** — VLM 推理（Doubao / Claude / GPT-4V）
-- **perception/** — 视觉处理（坐标转换、图像编码）
-- **safety/** — 安全防护（敏感动作识别）
-- **core/** — 核心逻辑（Task / Action / Runner / Session）
-
-新增 VLM 后端示例：
-```python
-# seetouch/reasoning/claude.py
-from .base import Reasoner, ReasoningResult
-
-class ClaudeReasoner(Reasoner):
-    def reason(self, screenshot, task, history) -> ReasoningResult:
-        # 实现 Claude API 调用
-        ...
-```
-
----
-
-## 真机测试
-
-提交涉及设备控制或推理逻辑的 PR 时，建议提供真机验证结果：
-
-```bash
-python -m seetouch run "你的测试指令"
-```
-
-在 PR 描述中附上：
-- 设备信息（型号 / Android 版本）
-- 任务步数 / 耗时
-- `./runs/<timestamp>/report.json` 内容摘要
-
----
-
-## 文档更新
-
-文档与代码同样重要！
-
-- **README.md** — 用户使用指南、快速开始
-- **代码注释** — 复杂逻辑、设计决策、已知限制
-- **CHANGELOG.md**（如适用）— 版本更新记录
-
----
-
-## 行为准则
-
-- **尊重他人**：友善、包容、建设性反馈
-- **开放讨论**：欢迎不同意见，通过讨论达成共识
-- **质量优先**：宁可多花时间完善，不要匆忙提交半成品
-
----
-
-## 获取帮助
-
-遇到问题？
-
-- **Discussions**: [GitHub Discussions](https://github.com/YidaYang/seetouch/discussions) — 技术讨论、使用交流
-- **Issues**: [GitHub Issues](https://github.com/YidaYang/seetouch/issues) — Bug 报告、功能请求
-
----
-
-## 许可协议
-
-提交代码即表示同意以 [Apache License 2.0](LICENSE) 开源。
-
----
-
-**感谢你的贡献！每一个 PR 都让 SeeTouch 变得更好。** 🎉
+- 用户流程改动同步 README 和对应指南；架构决策同步 `memory/technical_decisions.md`；历史记录注明当时版本与验证范围。
+- 公开文档使用相对路径或 `<repo>` 等占位符，保留作者署名但避免个人邮箱和电脑路径。
+- Git 提交邮箱可在 GitHub Settings → Emails 中选择平台提供的 noreply 地址；修改本地配置只影响新提交，旧提交原始元数据不会自动变化。
+- 项目元数据声明 Apache-2.0；当前缺少 `LICENSE` 正文，需维护者确认补齐。不要链接不存在的许可证文件。

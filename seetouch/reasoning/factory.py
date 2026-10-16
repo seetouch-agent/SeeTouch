@@ -5,16 +5,17 @@ from __future__ import annotations
 from .base import Reasoner
 from .doubao import DoubaoReasoner
 from .gemini import GeminiReasoner
-from .openai_compatible import OpenAICompatibleReasoner
+from .openai import OpenAIReasoner
 
 
 REASONER_NAMES = ("openai", "doubao", "gemini")
-DEFAULT_REASONER = "openai"
+DEFAULT_REASONER = "gemini"
+DEFAULT_DEBUG_REASONER = "doubao"
 
 
 def create_reasoner(name: str = DEFAULT_REASONER) -> Reasoner:
     if name == "openai":
-        return OpenAICompatibleReasoner()
+        return OpenAIReasoner()
     if name == "doubao":
         return DoubaoReasoner()
     if name == "gemini":

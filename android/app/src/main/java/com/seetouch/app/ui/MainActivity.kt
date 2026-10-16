@@ -122,8 +122,9 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
                     when {
                         instruction.isBlank() -> warning = "请输入任务指令"
                         settings.apiKey.isBlank() ->
-                            warning = "请先在设置页填入 OpenAI 兼容 API key"
-                        settings.modelId.isBlank() -> warning = "请先在设置页填写模型 ID"
+                            warning = "请先在设置页填入所选后端的 API key"
+                        settings.reasoner == "openai" && settings.modelId.isBlank() ->
+                            warning = "请先在设置页填写模型 ID"
                         SeeTouchAccessibilityService.instance == null ->
                             warning = "请先开启 SeeTouch 无障碍服务（点下方按钮跳转）"
                         else -> {
@@ -263,14 +264,17 @@ private fun StepCard(step: StepInfo) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
+    var reasoner by remember { mutableStateOf(settings.reasoner) }
     var apiKey by remember { mutableStateOf(settings.apiKey) }
     var baseUrl by remember { mutableStateOf(settings.baseUrl) }
     var modelId by remember { mutableStateOf(settings.modelId) }
     var reasoningEffort by remember { mutableStateOf(settings.reasoningEffort) }
+    var thinkingMode by remember { mutableStateOf(settings.thinkingMode) }
     var maxSteps by remember { mutableStateOf(settings.maxSteps.toString()) }
     var saved by remember { mutableStateOf(false) }
     val reasoningOptions = listOf(
         "" to "模型默认",
+        "none" to "关闭（需模型支持）",
         "minimal" to "极低",
         "low" to "低",
         "medium" to "中",
@@ -295,10 +299,26 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
+            Text("推理后端")
+            listOf("doubao" to "豆包", "openai" to "OpenAI 兼容接口").forEach { (value, label) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = reasoner == value,
+                        onClick = {
+                            reasoner = value
+                            apiKey = settings.apiKeyFor(value)
+                            baseUrl = settings.baseUrlFor(value)
+                            modelId = settings.modelIdFor(value)
+                            saved = false
+                        },
+                    )
+                    Text(label)
+                }
+            }
             OutlinedTextField(
                 value = apiKey,
                 onValueChange = { apiKey = it; saved = false },
-                label = { Text("OpenAI 兼容 API Key") },
+                label = { Text("API Key") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -314,7 +334,7 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
             OutlinedTextField(
                 value = modelId,
                 onValueChange = { modelId = it; saved = false },
-                label = { Text("模型 ID") },
+                label = { Text(if (reasoner == "doubao") "模型 ID（留空用默认）" else "模型 ID") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -327,23 +347,39 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
                 singleLine = true,
             )
             Spacer(Modifier.height(12.dp))
-            Text("思考强度（模型不支持时请选择“模型默认”）")
-            reasoningOptions.forEach { (value, label) ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(
-                        selected = reasoningEffort == value,
-                        onClick = { reasoningEffort = value; saved = false },
-                    )
-                    Text(label)
+            if (reasoner == "doubao") {
+                Text("豆包深度思考")
+                listOf("enabled" to "开启", "disabled" to "关闭", "auto" to "自动（需模型支持）")
+                    .forEach { (value, label) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = thinkingMode == value,
+                                onClick = { thinkingMode = value; saved = false },
+                            )
+                            Text(label)
+                        }
+                    }
+            } else {
+                Text("思考强度（模型不支持时请选择“模型默认”）")
+                reasoningOptions.forEach { (value, label) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(
+                            selected = reasoningEffort == value,
+                            onClick = { reasoningEffort = value; saved = false },
+                        )
+                        Text(label)
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
             Button(
                 onClick = {
+                    settings.reasoner = reasoner
                     settings.apiKey = apiKey
                     settings.baseUrl = baseUrl
                     settings.modelId = modelId
                     settings.reasoningEffort = reasoningEffort
+                    settings.thinkingMode = thinkingMode
                     settings.maxSteps = maxSteps.toIntOrNull()?.coerceIn(1, 200) ?: 45
                     saved = true
                 },

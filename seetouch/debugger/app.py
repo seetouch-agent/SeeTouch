@@ -22,7 +22,7 @@ from ..core.event_bus import EventBus
 from ..core.runner import Runner
 from ..device.android.controller import AndroidController
 from ..logging_config import configure_logging
-from ..reasoning.factory import DEFAULT_REASONER, create_reasoner
+from ..reasoning.factory import DEFAULT_DEBUG_REASONER, create_reasoner
 from ..safety.guard import Guard
 from .debug_session import DebugSession, StepData
 
@@ -34,7 +34,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def create_app(
     settings: AppSettings | None = None,
-    reasoner_name: str = DEFAULT_REASONER,
+    reasoner_name: str = DEFAULT_DEBUG_REASONER,
 ) -> tuple[Flask, SocketIO]:
     """创建 Flask 应用和 SocketIO 实例。"""
     app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
@@ -189,7 +189,7 @@ def create_app(
 def run_server(
     port: int = 5000,
     settings: AppSettings | None = None,
-    reasoner_name: str = DEFAULT_REASONER,
+    reasoner_name: str = DEFAULT_DEBUG_REASONER,
 ) -> None:
     """启动调试器 Web 服务。"""
     load_env()
