@@ -1,45 +1,69 @@
 package com.seetouch.app.settings
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONObject
 
-/** 轻量配置存取,与 PC 端 .env 的可配置项对齐。 */
-class AppSettings(context: Context) {
+/** 各后端分别存储凭据；未选择后端的旧配置继续使用豆包。 */
+class AppSettings internal constructor(private val prefs: SharedPreferences) {
+    constructor(context: Context) : this(
+        context.getSharedPreferences("seetouch_settings", Context.MODE_PRIVATE),
+    )
 
-    private val prefs =
-        context.getSharedPreferences("seetouch_settings", Context.MODE_PRIVATE)
+    var reasoner: String
+        get() = prefs.getString("reasoner", "doubao").orEmpty()
+        set(value) {
+            require(value in setOf("doubao", "openai"))
+            prefs.edit().putString("reasoner", value).apply()
+        }
+
+    fun apiKeyFor(provider: String): String =
+        prefs.getString("${provider}_api_key", "").orEmpty()
+
+    fun baseUrlFor(provider: String): String =
+        prefs.getString("${provider}_base_url", if (provider == "doubao")
+            "https://ark.cn-beijing.volces.com/api/v3" else "https://api.openai.com/v1").orEmpty()
+
+    fun modelIdFor(provider: String): String =
+        prefs.getString("${provider}_model_id", "").orEmpty()
 
     var apiKey: String
-        get() = prefs.getString(KEY_API_KEY, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_API_KEY, value.trim()).apply()
+        get() = apiKeyFor(reasoner)
+        set(value) = prefs.edit().putString("${reasoner}_api_key", value.trim()).apply()
 
-    /** 空串 = 用 seetouch 默认模型。 */
+    var baseUrl: String
+        get() = baseUrlFor(reasoner)
+        set(value) = prefs.edit().putString("${reasoner}_base_url", value.trim().trimEnd('/')).apply()
+
     var modelId: String
-        get() = prefs.getString(KEY_MODEL_ID, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_MODEL_ID, value.trim()).apply()
+        get() = modelIdFor(reasoner)
+        set(value) = prefs.edit().putString("${reasoner}_model_id", value.trim()).apply()
 
-    /** enabled(VisualCoT,最准) / disabled(最快最省)。 */
+    /** 保留旧版本用户选择，不转换为 reasoning_effort。 */
     var thinkingMode: String
-        get() = prefs.getString(KEY_THINKING_MODE, "enabled").orEmpty()
-        set(value) = prefs.edit().putString(KEY_THINKING_MODE, value).apply()
+        get() = prefs.getString("thinking_mode", "enabled").orEmpty()
+        set(value) = prefs.edit().putString("thinking_mode", value).apply()
+
+    var reasoningEffort: String
+        get() = prefs.getString("reasoning_effort", "").orEmpty()
+        set(value) = prefs.edit().putString("reasoning_effort", value).apply()
 
     var maxSteps: Int
-        get() = prefs.getInt(KEY_MAX_STEPS, 45)
-        set(value) = prefs.edit().putInt(KEY_MAX_STEPS, value).apply()
+        get() = prefs.getInt("max_steps", 45)
+        set(value) = prefs.edit().putInt("max_steps", value).apply()
 
-    /** 组装 task_entry.run_task 需要的运行配置 JSON。 */
-    fun toTaskConfigJson(): String =
-        JSONObject()
-            .put("api_key", apiKey)
-            .put("model_id", modelId)
-            .put("thinking_mode", thinkingMode)
-            .put("max_steps", maxSteps)
-            .toString()
-
-    companion object {
-        private const val KEY_API_KEY = "doubao_api_key"
-        private const val KEY_MODEL_ID = "doubao_model_id"
-        private const val KEY_THINKING_MODE = "thinking_mode"
-        private const val KEY_MAX_STEPS = "max_steps"
-    }
+    fun toTaskConfigJson(): String = JSONObject()
+        .put("reasoner", reasoner)
+        .put("api_key", apiKey)
+        .put("model_id", modelId)
+        .put("max_steps", maxSteps)
+        .apply {
+            if (reasoner == "doubao") {
+                put("api_url", baseUrl)
+                put("thinking_mode", thinkingMode)
+            } else {
+                put("base_url", baseUrl)
+                put("reasoning_effort", reasoningEffort)
+            }
+        }.toString()
 }

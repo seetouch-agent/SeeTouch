@@ -4,7 +4,7 @@
 
 ## 支持范围
 
-CLI `python -m seetouch run` 默认选择 `GeminiReasoner`；`--reasoner doubao` 切到 Doubao。Web 调试器和 Android App 当前仍固定 Doubao，设置 `GEMINI_API_KEY` 不会使它们自动切换。
+CLI `python -m seetouch run` 默认选择 `GeminiReasoner`；`--reasoner doubao` 切到 Doubao。Web 调试器默认 Doubao，可用 `python -m seetouch debug --reasoner gemini` 显式选择 Gemini；Android 未安装 Gemini SDK。仅设置 `GEMINI_API_KEY` 不会切换后端。
 
 当前使用 `google-generativeai>=0.8.0` 和 `google.generativeai.GenerativeModel`，尚未迁移到 `google-genai`。代码默认模型字符串是 `gemini-3.1-flash-lite`，可通过 `GEMINI_MODEL_ID` 覆盖；该字符串不代表本轮已验证服务可用。
 

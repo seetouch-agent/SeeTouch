@@ -18,6 +18,7 @@ from .prompts import build_history_summary, build_system_prompt, extract_summary
 
 
 logger = logging.getLogger(__name__)
+REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 @dataclass
@@ -29,6 +30,7 @@ class OpenAIConfig:
     max_retries: int = 1
     history_window: int = 8
     api_mode: str = "chat_completions"
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         if not self.api_key.strip() or not self.model_id.strip():
@@ -45,6 +47,12 @@ class OpenAIConfig:
             raise ValueError("OPENAI_API_MODE must be chat_completions or responses")
         if self.timeout <= 0 or self.max_retries < 0:
             raise ValueError("OPENAI_TIMEOUT must be positive; OPENAI_MAX_RETRIES must be >= 0")
+        if self.reasoning_effort is not None:
+            self.reasoning_effort = self.reasoning_effort.strip().lower()
+            if self.reasoning_effort in {"", "default"}:
+                self.reasoning_effort = None
+            elif self.reasoning_effort not in REASONING_EFFORTS:
+                raise ValueError("Unsupported OPENAI_REASONING_EFFORT")
 
     @classmethod
     def from_env(cls) -> "OpenAIConfig":
@@ -55,6 +63,7 @@ class OpenAIConfig:
             timeout=float(os.environ.get("OPENAI_TIMEOUT", "60")),
             max_retries=int(os.environ.get("OPENAI_MAX_RETRIES", "1")),
             api_mode=os.environ.get("OPENAI_API_MODE", "chat_completions"),
+            reasoning_effort=os.environ.get("OPENAI_REASONING_EFFORT"),
         )
 
 
@@ -92,6 +101,9 @@ class OpenAIReasoner:
         try:
             reasoning = ""
             if self._config.api_mode == "responses":
+                options = {}
+                if self._config.reasoning_effort is not None:
+                    options["reasoning"] = {"effort": self._config.reasoning_effort}
                 response = self._client.responses.create(
                     model=self._config.model_id,
                     input=[{"role": "user", "content": [
@@ -99,14 +111,20 @@ class OpenAIReasoner:
                         {"type": "input_image", "image_url": encode_image_data_url(screenshot)},
                     ]}],
                     store=False,
+                    **options,
                 )
                 if response.status != "completed":
                     raise ValueError(f"Responses request did not complete: {response.status}")
                 raw_output = response.output_text
                 input_field, output_field = "input_tokens", "output_tokens"
             else:
+                options = {}
+                if self._config.reasoning_effort is not None:
+                    # extra_body also works with the Android SDK (openai 1.30).
+                    options["extra_body"] = {"reasoning_effort": self._config.reasoning_effort}
                 response = self._client.chat.completions.create(
                     model=self._config.model_id, messages=messages,
+                    **options,
                 )
                 message = response.choices[0].message
                 raw_output = message.content

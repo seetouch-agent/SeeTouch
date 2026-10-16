@@ -9,8 +9,8 @@ SeeTouch 通过屏幕截图和视觉语言模型（VLM）理解手机界面，�
 | 入口 | 设备控制 | 当前推理后端 | 敏感动作确认 |
 |---|---|---|---|
 | PC 命令行 `run` | ADB + uiautomator2 | 默认 Gemini；可选 `--reasoner doubao` 或 `--reasoner openai` | 命中关键词规则后在终端确认 |
-| PC Web 调试器 `debug` | ADB + uiautomator2 | 固定 Doubao，尚无模型选择参数 | **当前自动批准，尚未接入交互确认** |
-| Android 独立 App | 无障碍服务 + Kotlin/Python 桥接 | 固定 Doubao，通过 App 设置配置 | App 内确认，5 分钟超时拒绝 |
+| PC Web 调试器 `debug` | ADB + uiautomator2 | 默认 Doubao，可用 `--reasoner` 选择 Gemini / OpenAI | **当前自动批准，尚未接入交互确认** |
+| Android 独立 App | 无障碍服务 + Kotlin/Python 桥接 | 默认 Doubao，设置页可选 OpenAI 兼容 Chat Completions | App 内确认，5 分钟超时拒绝 |
 
 Android App 不依赖电脑执行任务，但仍需联网调用云端模型。构建与安装见 [Android 指南](android/README.md)。
 
@@ -77,7 +77,7 @@ python -m seetouch run "打开设置" --reasoner doubao
 
 `SEETOUCH_THINKING_MODE` 仅由 Doubao 适配器读取，Gemini 和 OpenAI 适配器不读取它。代码接受 `enabled`、`disabled`、`auto`；历史测试中的默认 Doubao Vision 模型不支持 `auto`，其他模型的支持情况需单独核实。
 
-### OpenAI / OpenAI 兼容中转站（CLI）
+### OpenAI / OpenAI 兼容中转站
 
 PC 端要求 `openai>=1.66.0`，以支持 Responses 和 `output_text`。已有环境请重新执行
 `python -m pip install -e .` 更新依赖；仅更新源码不会升级 SDK。
@@ -91,6 +91,7 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_API_MODE=chat_completions
 OPENAI_TIMEOUT=60
 OPENAI_MAX_RETRIES=1
+OPENAI_REASONING_EFFORT=
 ```
 
 中转站请填写服务商提供的 API 基础地址（常见为 `https://your-host/v1`），
@@ -101,6 +102,9 @@ SDK 可能按 `OPENAI_MAX_RETRIES` 重试请求；调用费用以服务商规则
 Key 和模型 ID 必须来自同一个服务商；只支持文本的模型不适用于此入口。
 第三方即使暴露 Responses 路由，也可能限制为特定客户端；403 应按服务商要求处理。
 此适配器不发送豆包的 `thinking` 参数，也不读取 `VLM_API_KEY`。
+可用 `OPENAI_REASONING_EFFORT` 显式设置模型支持的思考强度；留空不发送参数。
+Chat Completions 使用 `reasoning_effort`，Responses 使用 `reasoning.effort`。
+各服务商支持值不同，`none` 表示显式请求关闭推理，不能等同于留空。
 
 ```powershell
 python -m seetouch run "打开设置" --reasoner openai --max-steps 3
@@ -120,7 +124,8 @@ python -m seetouch run "打开设置" --reasoner openai --max-steps 3
 `trace.jsonl` 保存动作、摘要、执行结果、提示词和用量等信息，当前不保存完整模型原始输出或推理内容；离线回放不能恢复这些字段。
 
 已有进程环境变量优先于 `.env`；修改 `.env` 后重新启动命令。截图和任务会发送到配置的服务商。
-分享日志和运行产物前请去除密钥及屏幕中的私人信息。Web 调试器和 Android App 仍固定使用 Doubao。
+分享日志和运行产物前请去除密钥及屏幕中的私人信息。Web 调试器用 `python -m seetouch debug --reasoner openai` 选择此后端。
+Android 在设置页选择后端并分别保存凭据；保留原豆包 thinking 设置，OpenAI 仅支持 Chat Completions。
 
 ### CLI 参数和环境变量
 
@@ -140,7 +145,7 @@ python -m seetouch run "打开设置" --reasoner doubao --max-steps 20 --runs-di
 
 已有环境变量优先于 `.env`。Gemini key 按 `GEMINI_API_KEY → VLM_API_KEY` 读取；Doubao 按 `VLM_API_KEY → DOUBAO_API_KEY` 读取；OpenAI 兼容后端仅读取 `OPENAI_API_KEY`。不同厂商凭据不能混用。
 
-`UnifiedConfig` 已存在，但 CLI 仍使用兼容的 `AppSettings` 和各 Reasoner 配置。该类中的额外环境变量并未全部接入运行入口，详见 [技术决策](memory/technical_decisions.md)。
+CLI 和调试器共用 Reasoner 工厂，但保留各自原有默认后端。`UnifiedConfig` 已存在，但入口仍使用兼容的 `AppSettings` 和各 Reasoner 配置。该类中的额外环境变量并未全部接入运行入口，详见 [技术决策](memory/technical_decisions.md)。
 
 ### 应用索引和运行记录
 
@@ -167,9 +172,9 @@ python -m pip install -e ".[debugger]"
 python -m seetouch debug --port 5000
 ```
 
-浏览器访问 `http://localhost:5000`。支持 Step / Run / Pause / Stop、截图动作标注、步骤时间线、模型输入输出、Doubao 返回的推理内容、token 统计和实时日志。
+浏览器访问 `http://localhost:5000`。支持 Step / Run / Pause / Stop、截图动作标注、步骤时间线、模型输入输出、模型返回的推理内容、token 统计和实时日志。
 
-当前调试器固定使用 Doubao；设置 `GEMINI_API_KEY` 或 `OPENAI_API_KEY` 不能切换后端。服务监听 `0.0.0.0`，允许任意 CORS 来源且没有用户认证；敏感动作确认回调直接返回同意。应仅在受控开发环境运行，避免暴露到不可信网络，不用它执行支付、发消息或删除等敏感任务。
+调试器默认使用 Doubao；通过 `--reasoner gemini` 或 `--reasoner openai` 显式切换，单独设置 key 不会切换后端。服务监听 `0.0.0.0`，允许任意 CORS 来源且没有用户认证；敏感动作确认回调直接返回同意。应仅在受控开发环境运行，避免暴露到不可信网络，不用它执行支付、发消息或删除等敏感任务。
 
 ## 架构与动作
 

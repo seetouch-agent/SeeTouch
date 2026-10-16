@@ -1,6 +1,6 @@
 # SeeTouch Android
 
-独立 Android GUI Agent App，同时保留供 PC 导出应用索引的 helper 入口。任务在手机上执行，模型推理仍调用云端 Doubao，不是离线模型。
+独立 Android GUI Agent App，同时保留供 PC 导出应用索引的 helper 入口。任务在手机上执行，模型推理调用云端 Doubao 或用户选择的 OpenAI 兼容服务，不是离线模型。
 
 核对日期：2026-10-12；代码基线：`de755f7`。
 
@@ -18,7 +18,7 @@ Kotlin/Compose 提供 UI、前台 Service、无障碍截图/手势和 `DeviceBri
 | ABI | arm64-v8a、x86_64 |
 | App versionName | 1.0；与 Python 包版本独立 |
 
-PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，另装 Pillow 和 python-dotenv；没有安装 Gemini SDK，任务入口也固定 Doubao。
+PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，另装 Pillow 和 python-dotenv；没有安装 Gemini SDK。默认使用 Doubao，也可选 OpenAI 兼容 Chat Completions；此 SDK 不支持 Responses，PC 的 SDK 升级不应用于 APK。
 
 ## 编译与安装
 
@@ -37,7 +37,7 @@ macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下�
 ## 独立 App 使用
 
 1. 安装 APK，在系统设置中启用 SeeTouch 无障碍服务。
-2. 在 App 设置页填写 Doubao key，可设置模型 ID、最大步数和 thinking 开关。
+2. 在设置页选择 Doubao 或 OpenAI 兼容接口，填写对应的 key、Base URL 和模型 ID。旧配置默认继续使用 Doubao，保留原 thinking 选择；两种后端分别保存凭据。OpenAI 模型 ID 必填，思考强度留空表示模型默认，只有模型支持时才选择其他档位。
 3. 回任务页输入指令并开始。入口先回桌面，再由前台 Service 执行。
 4. 回到 SeeTouch 查看步骤时间线；命中敏感动作规则时在 App 内确认，5 分钟未确认默认拒绝。
 

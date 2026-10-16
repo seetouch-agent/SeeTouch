@@ -1,18 +1,18 @@
 # Gemini 集成状态
 
-更新时间：2026-10-12；代码基线：`de755f7`。使用方式见 [集成指南](gemini-integration.md)。
+更新时间：2026-10-16（入口选择已更新，历史验证保留原日期）。使用方式见 [集成指南](gemini-integration.md)。
 
 ## 已实现
 
 - `seetouch/reasoning/gemini.py`：`GeminiConfig`、`GeminiReasoner`、PIL 图像输入、公共 parser/prompts、token 统计。
-- `seetouch/cli/main.py`：`run --reasoner gemini|doubao`，默认 Gemini。
+- `seetouch/cli/main.py`：`run --reasoner gemini|doubao|openai`，默认 Gemini；`debug --reasoner gemini` 可显式选择。
 - `pyproject.toml`：PC 依赖 `google-generativeai>=0.8.0`。
-- `seetouch/reasoning/__init__.py`：导出两个后端及配置。
+- `seetouch/reasoning/__init__.py`：导出 Gemini、Doubao 和 OpenAI 后端及配置。
 - `tests/test_gemini_reasoner.py`：5 项配置测试。
 
 ## 尚未实现或存在缺口
 
-- 调试器和 Android App 的 Gemini 接入；两者目前仍实例化 Doubao。
+- Android App 的 Gemini 接入；APK 未安装 Gemini SDK。
 - API 异常与正常 COMPLETE 的区分；当前异常可能导致完成状态误报。
 - 应用级限流、指数退避、真实 API 集成测试。
 - Gemini 推理内容展示；当前适配器不提取该字段。
