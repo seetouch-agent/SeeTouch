@@ -3,6 +3,7 @@
 from .base import Reasoner, StepRecord
 from .doubao import DoubaoConfig, DoubaoReasoner
 from .gemini import GeminiConfig, GeminiReasoner
+from .openai import OpenAIConfig, OpenAIReasoner
 
 __all__ = [
     "Reasoner",
@@ -11,4 +12,6 @@ __all__ = [
     "DoubaoReasoner",
     "GeminiConfig",
     "GeminiReasoner",
+    "OpenAIConfig",
+    "OpenAIReasoner",
 ]

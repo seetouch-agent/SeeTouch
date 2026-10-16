@@ -8,7 +8,7 @@ SeeTouch 通过屏幕截图和视觉语言模型（VLM）理解手机界面，�
 
 | 入口 | 设备控制 | 当前推理后端 | 敏感动作确认 |
 |---|---|---|---|
-| PC 命令行 `run` | ADB + uiautomator2 | 默认 Gemini，可用 `--reasoner doubao` 切换 | 命中关键词规则后在终端确认 |
+| PC 命令行 `run` | ADB + uiautomator2 | 默认 Gemini；可选 `--reasoner doubao` 或 `--reasoner openai` | 命中关键词规则后在终端确认 |
 | PC Web 调试器 `debug` | ADB + uiautomator2 | 固定 Doubao，尚无模型选择参数 | **当前自动批准，尚未接入交互确认** |
 | Android 独立 App | 无障碍服务 + Kotlin/Python 桥接 | 固定 Doubao，通过 App 设置配置 | App 内确认，5 分钟超时拒绝 |
 
@@ -75,7 +75,52 @@ SEETOUCH_THINKING_MODE=enabled
 python -m seetouch run "打开设置" --reasoner doubao
 ```
 
-`SEETOUCH_THINKING_MODE` 控制 Doubao，Gemini 适配器不读取它。代码接受 `enabled`、`disabled`、`auto`；历史测试中的默认 Doubao Vision 模型不支持 `auto`，其他模型的支持情况需单独核实。
+`SEETOUCH_THINKING_MODE` 仅由 Doubao 适配器读取，Gemini 和 OpenAI 适配器不读取它。代码接受 `enabled`、`disabled`、`auto`；历史测试中的默认 Doubao Vision 模型不支持 `auto`，其他模型的支持情况需单独核实。
+
+### OpenAI / OpenAI 兼容中转站（CLI）
+
+PC 端要求 `openai>=1.66.0`，以支持 Responses 和 `output_text`。已有环境请重新执行
+`python -m pip install -e .` 更新依赖；仅更新源码不会升级 SDK。
+
+使用支持图片输入的模型，在本地 `.env` 中配置：
+
+```dotenv
+OPENAI_API_KEY=replace-with-your-key
+OPENAI_MODEL_ID=replace-with-your-vision-model-id
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_MODE=chat_completions
+OPENAI_TIMEOUT=60
+OPENAI_MAX_RETRIES=1
+```
+
+中转站请填写服务商提供的 API 基础地址（常见为 `https://your-host/v1`），
+不要包含末尾的 `/chat/completions` 或 `/responses`；程序会按协议自动追加。
+`OPENAI_API_MODE=chat_completions` 使用 Chat Completions；仅支持 Responses 的模型请设置
+`OPENAI_API_MODE=responses`。程序不根据模型名称猜测协议，也不会在失败后自动换用另一种协议。
+SDK 可能按 `OPENAI_MAX_RETRIES` 重试请求；调用费用以服务商规则为准。
+Key 和模型 ID 必须来自同一个服务商；只支持文本的模型不适用于此入口。
+第三方即使暴露 Responses 路由，也可能限制为特定客户端；403 应按服务商要求处理。
+此适配器不发送豆包的 `thinking` 参数，也不读取 `VLM_API_KEY`。
+
+```powershell
+python -m seetouch run "打开设置" --reasoner openai --max-steps 3
+```
+
+调试顺序：
+
+1. `python -m seetouch run --help` 确认 `--reasoner` 包含 `openai`。
+2. 先用上面的小步数命令测试。日志应显示 `provider=openai`、模型名称和 HTTP 请求状态。
+3. 401/403 检查 Key、模型权限和客户端限制；404 检查基础地址、模型 ID，以及服务是否提供所选协议；
+   400 按响应说明检查协议、模型是否支持图片和 base64 data URL；429 检查配额或限流。
+4. 超时可增加 `OPENAI_TIMEOUT`（每次请求的秒数）；排查重试时设 `OPENAI_MAX_RETRIES=0`。
+5. 查看 `runs/<task_id>/step_001.png`、`trace.jsonl` 和 `summary.json`，或执行
+   `python scripts/replay.py runs/<task_id>`。输出解析失败会降级 WAIT；API 错误、空文本或
+   输出截断会终止任务，结果为 `completed=False`，而不会误报完成。
+
+`trace.jsonl` 保存动作、摘要、执行结果、提示词和用量等信息，当前不保存完整模型原始输出或推理内容；离线回放不能恢复这些字段。
+
+已有进程环境变量优先于 `.env`；修改 `.env` 后重新启动命令。截图和任务会发送到配置的服务商。
+分享日志和运行产物前请去除密钥及屏幕中的私人信息。Web 调试器和 Android App 仍固定使用 Doubao。
 
 ### CLI 参数和环境变量
 
@@ -86,14 +131,14 @@ python -m seetouch run "打开设置" --reasoner doubao --max-steps 20 --runs-di
 
 | 设置 | 默认值 / 含义 |
 |---|---|
-| `--reasoner` | `gemini`；也可选 `doubao`，不是环境变量自动选择 |
+| `--reasoner` | `gemini`；也可选 `doubao` 或 `openai`，不是环境变量自动选择 |
 | `--serial` / `SEETOUCH_DEVICE_SERIAL` | 指定设备；未指定时由 uiautomator2 连接 |
 | `--max-steps` / `SEETOUCH_MAX_STEPS` | 45 |
 | `--runs-dir` / `SEETOUCH_RUNS_DIR` | `runs` |
 | `SEETOUCH_LOG_LEVEL` | `INFO` |
 | `SEETOUCH_APPLIST_PATH` | PC 应用索引路径，默认 `~/.seetouch/applist.json` |
 
-已有环境变量优先于 `.env`。Gemini key 按 `GEMINI_API_KEY → VLM_API_KEY` 读取；Doubao 按 `VLM_API_KEY → DOUBAO_API_KEY` 读取。不同厂商凭据不能混用。
+已有环境变量优先于 `.env`。Gemini key 按 `GEMINI_API_KEY → VLM_API_KEY` 读取；Doubao 按 `VLM_API_KEY → DOUBAO_API_KEY` 读取；OpenAI 兼容后端仅读取 `OPENAI_API_KEY`。不同厂商凭据不能混用。
 
 `UnifiedConfig` 已存在，但 CLI 仍使用兼容的 `AppSettings` 和各 Reasoner 配置。该类中的额外环境变量并未全部接入运行入口，详见 [技术决策](memory/technical_decisions.md)。
 
@@ -113,7 +158,7 @@ python scripts/pull_applist.py
 python scripts/replay.py runs/<task_id>
 ```
 
-环境诊断入口为 `python scripts/doctor.py`。它会连接设备，当前仅检查 Doubao 凭据且打印 key 前缀；仅配置 Gemini 时可能报缺少 key，分享输出前应脱敏。
+环境诊断入口为 `python scripts/doctor.py`。它会连接设备，当前仅检查 Doubao 凭据且打印 key 前缀；仅配置 Gemini 或 OpenAI 时可能报缺少 key，不能据此判断这些后端配置无效，分享输出前应脱敏。
 
 ## Web 调试器
 
@@ -124,7 +169,7 @@ python -m seetouch debug --port 5000
 
 浏览器访问 `http://localhost:5000`。支持 Step / Run / Pause / Stop、截图动作标注、步骤时间线、模型输入输出、Doubao 返回的推理内容、token 统计和实时日志。
 
-当前调试器固定使用 Doubao；仅设置 `GEMINI_API_KEY` 不能切换后端。服务监听 `0.0.0.0`，允许任意 CORS 来源且没有用户认证；敏感动作确认回调直接返回同意。应仅在受控开发环境运行，避免暴露到不可信网络，不用它执行支付、发消息或删除等敏感任务。
+当前调试器固定使用 Doubao；设置 `GEMINI_API_KEY` 或 `OPENAI_API_KEY` 不能切换后端。服务监听 `0.0.0.0`，允许任意 CORS 来源且没有用户认证；敏感动作确认回调直接返回同意。应仅在受控开发环境运行，避免暴露到不可信网络，不用它执行支付、发消息或删除等敏感任务。
 
 ## 架构与动作
 
@@ -136,7 +181,7 @@ seetouch/
 │   ├── android/    # PC uiautomator2、AppIndex、AppLauncher
 │   └── android_native/  # Android App 的 Kotlin 桥接适配器
 ├── perception/     # screen.py：缩放、坐标换算、图像编码
-├── reasoning/      # base.py、doubao.py、gemini.py、parser.py、prompts.py
+├── reasoning/      # base.py、doubao.py、gemini.py、openai.py、parser.py、prompts.py
 ├── safety/         # 关键词规则和确认回调
 ├── debugger/       # Flask / SocketIO + 原生 Web UI
 └── cli/            # 命令行组装
@@ -161,11 +206,11 @@ OPEN 顺序为学习缓存、本机索引归一化精确匹配、唯一子串匹
 
 ## 已知限制与数据处理
 
-- **完成状态可能误报**：两个 Reasoner 在捕获 API 异常时均返回 `COMPLETE`，Runner 随后会记为 completed；这是待修问题。模型输出解析失败才降级为 `WAIT`，不能把它描述成可靠的 API 重试。
+- **Gemini / Doubao 完成状态可能误报**：这两个 Reasoner 在捕获 API 异常时仍返回 `COMPLETE`，Runner 随后会记为 completed；这是待修问题。OpenAI 适配器抛出 `VLMAPIError`，由 Runner 中止并记录失败。模型输出解析失败降级为 `WAIT` 与 API 失败处理不同。
 - Guard 依赖任务文本和模型摘要中的关键词，可能漏判；各入口的确认方式不同，见首表。
 - 截图、任务指令及历史摘要会发送给所选云端模型；本地截图、日志、trace 也可能包含聊天内容、账号或输入文本，当前没有自动脱敏。
 - Android key 使用普通 SharedPreferences 保存；备份规则和 exported 诊断入口尚待加固，见 [隐私审计](docs/privacy-audit.md)。
-- 暂未实现通用 OpenAI 后端入口、多轮澄清、用户偏好、Playbook、Web/iOS/桌面控制；Python Protocol 提供扩展点。
+- 暂未实现多轮澄清、用户偏好、Playbook、Web/iOS/桌面控制；Python Protocol 提供扩展点。
 
 ## 开发与验证
 
@@ -175,7 +220,9 @@ python -m pytest tests -q
 python -m ruff check seetouch
 ```
 
-2026-10-12 在上述代码基线上：`tests/` **88 passed**，`ruff check seetouch` 通过。扩大到 `ruff check seetouch tests scripts` 时有 4 项既存测试文件 lint 问题。上述结果来自离线单元 / mock 测试，不证明真实模型服务或手机任务成功。
+2026-10-15，包含 OpenAI 兼容后端及两种协议的工作树：`tests/` **101 passed**，`ruff check seetouch --no-cache` 和 `git diff --check` 通过。测试使用离线单元 / mock 请求，不调用真实 API 或操作手机。
+
+用户真机验证：CLI 通过 DeepSeek 的 OpenAI 兼容 Chat Completions 接口，在小米 Android 16 手机上执行“打开小红书”，最大步数设置为 3，人工确认应用成功打开。此记录未注明具体模型 ID 和实际执行步数；Responses 尚无真实服务成功验证记录。未在本轮重新构建 Android APK，此 CLI 验证不能作为独立 App 回归结果。
 
 早期记录包含 Doubao + PC 路径的真机试跑，以及 Android 模拟器闭环；本轮未重新构建 APK、连接手机或调用真实模型。历史结果见 [开发历程](memory/development_history.md)，不能作为当前 Gemini 或 Android 真机回归结论。
 

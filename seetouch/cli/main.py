@@ -21,6 +21,7 @@ from ..device.android.controller import AndroidController
 from ..logging_config import configure_logging
 from ..reasoning.doubao import DoubaoReasoner
 from ..reasoning.gemini import GeminiReasoner
+from ..reasoning.openai import OpenAIReasoner
 from ..safety.guard import Guard
 
 
@@ -55,9 +56,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--runs-dir", default=None, help="运行产物输出目录(默认 ./runs)")
     p_run.add_argument(
         "--reasoner",
-        choices=["doubao", "gemini"],
+        choices=["doubao", "gemini", "openai"],
         default="gemini",
-        help="推理模型选择: doubao(火山引擎) 或 gemini(Google,默认)",
+        help="推理模型选择: doubao、gemini(默认) 或 openai(支持兼容中转站)",
     )
 
     p_debug = sub.add_parser("debug", help="启动图形化调试器")
@@ -83,6 +84,9 @@ def _cmd_run(args: argparse.Namespace, settings: AppSettings) -> int:
         if args.reasoner == "gemini":
             reasoner = GeminiReasoner()
             logger.info("using Gemini reasoner (default: gemini-3.1-flash-lite)")
+        elif args.reasoner == "openai":
+            reasoner = OpenAIReasoner()
+            logger.info("using OpenAI-compatible reasoner")
         else:
             reasoner = DoubaoReasoner()
             logger.info("using Doubao reasoner")

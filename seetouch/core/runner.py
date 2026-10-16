@@ -40,6 +40,7 @@ from ..reasoning.base import Reasoner
 from ..safety.guard import Guard
 from .session import RunResult, Session, StepResult
 from .task import Task
+from .exceptions import VLMAPIError
 
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,32 @@ class Runner:
         # 2. 推理
         self._emit(STEP_REASONING_STARTED, step=step)
         t0 = time.perf_counter()
-        out = self.reasoner.predict(task.instruction, screenshot, session.history)
+        try:
+            out = self.reasoner.predict(task.instruction, screenshot, session.history)
+        except VLMAPIError as exc:
+            from .action import ActionOutput
+
+            reason = f"reasoning_failed: {exc}"
+            logger.error("%s", reason)
+            reasoning_time = time.perf_counter() - t0
+            out = ActionOutput(
+                action=Action(type=ACTION_WAIT), raw_output=str(exc),
+                action_summary="模型调用失败，任务终止",
+            )
+            session.record_step(
+                step, out, execution_success=False, notes=[reason],
+                screenshot_path=screenshot_path, reasoning_time=reasoning_time,
+            )
+            session.mark_aborted(reason)
+            self._finished = True
+            return StepResult(
+                step=step, screenshot=screenshot, screenshot_path=screenshot_path,
+                prompt_text="", raw_output=str(exc), reasoning_content="",
+                action=out.action, screen_summary="", action_summary=out.action_summary,
+                execution_success=False, notes=[reason], usage=None,
+                reasoning_time=reasoning_time, execution_time=0.0,
+                terminal=True, terminal_reason=reason,
+            )
         reasoning_time = time.perf_counter() - t0
         self._emit(
             STEP_REASONING_DONE,
