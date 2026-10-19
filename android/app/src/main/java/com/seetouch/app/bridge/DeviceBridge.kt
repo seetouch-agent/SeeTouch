@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import com.seetouch.app.appindex.PackageManagerAppIndexProvider
 import com.seetouch.app.device.SeeTouchAccessibilityService
+import com.seetouch.app.task.TaskController
 import java.io.ByteArrayOutputStream
 
 /**
@@ -29,6 +30,9 @@ object DeviceBridge {
 
     @JvmStatic
     fun isServiceReady(): Boolean = SeeTouchAccessibilityService.instance != null
+
+    @JvmStatic fun expectRevision(revision: Long) = TaskController.expectRevision(revision)
+    @JvmStatic fun takeoverReason(): String? = service().takeoverReason()
 
     // ------------------------- 屏幕 -------------------------
 
@@ -104,7 +108,7 @@ object DeviceBridge {
         val intent = ctx.packageManager.getLaunchIntentForPackage(packageName)
             ?: return false
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        ctx.startActivity(intent)
+        service().controlled { ctx.startActivity(intent) }
         return true
     }
 

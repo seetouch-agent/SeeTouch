@@ -4,6 +4,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TaskProgressTest {
+    @Test fun suspendedTasksKeepOverlayActiveAndShowTheQuestionOrTakeoverReason() {
+        val waiting = TaskProgressDisplay.from(TaskUiState(status = TaskStatus.WAITING_USER,
+            pendingQuestion = PendingQuestion(1, "选哪个？", listOf("甲", "乙"))))
+        assertEquals("等待你的回答", waiting.title)
+        assertEquals("选哪个？", waiting.detail)
+        assertTrue(waiting.active)
+        assertFalse(waiting.running)
+        val takeover = TaskProgressDisplay.from(TaskUiState(status = TaskStatus.TAKEOVER, controlReason = "需要登录"))
+        assertTrue(takeover.detail.contains("需要登录"))
+        assertTrue(takeover.detail.contains("不截图"))
+        assertTrue(takeover.active)
+        assertFalse(takeover.running)
+    }
+
     @Test fun confirmationRemovesTerminalInstructionsButKeepsActionDetails() {
         val pending = PendingConfirmation.fromRunnerMessage("""
             ============== 敏感动作待确认 ==============

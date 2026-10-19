@@ -122,7 +122,7 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
                 onValueChange = { instruction = it },
                 label = { Text("要手机做什么？例如：在哔哩哔哩搜索采莲曲") },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = state.status != TaskStatus.RUNNING,
+                enabled = !state.workerActive,
                 minLines = 2,
             )
             Spacer(Modifier.height(12.dp))
@@ -143,10 +143,10 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
                         }
                     }
                 },
-                enabled = state.status != TaskStatus.RUNNING,
+                enabled = !state.workerActive,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (state.status == TaskStatus.RUNNING) "执行中…" else "开始执行")
+                Text(if (state.workerActive) "任务处理中…" else "开始执行")
             }
             warning?.let {
                 Spacer(Modifier.height(8.dp))
@@ -166,6 +166,7 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
             StatusLine(state)
+            TaskInteractionControls(state)
             Spacer(Modifier.height(8.dp))
             StepTimeline(state.steps)
         }
@@ -177,7 +178,7 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
             title = { Text("敏感动作待确认") },
             text = { Text(pending.message) },
             confirmButton = {
-                TextButton(onClick = { TaskController.respondToConfirmation(true) }) {
+                TextButton(onClick = { returnToTarget(context) { TaskController.respondToConfirmation(true, pending.id) } }) {
                     Text("允许执行")
                 }
             },
@@ -195,6 +196,9 @@ private fun StatusLine(state: TaskUiState) {
     val text = when (state.status) {
         TaskStatus.IDLE -> "就绪"
         TaskStatus.RUNNING -> "${TaskProgressDisplay.from(state).title}：${state.instruction}"
+        TaskStatus.PAUSED, TaskStatus.WAITING_USER, TaskStatus.TAKEOVER ->
+            "${TaskProgressDisplay.from(state).title}：${TaskProgressDisplay.from(state).detail}"
+        TaskStatus.STOPPED -> state.resultSummary ?: "已终止"
         TaskStatus.COMPLETED -> state.resultSummary ?: "任务完成"
         TaskStatus.ABORTED -> state.resultSummary ?: "任务中止"
         TaskStatus.ERROR -> "出错：${state.errorDetail?.take(300)}"
@@ -424,6 +428,12 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(12.dp))
+            ConnectionTestButton(
+                AppSettings.connectionConfigJson(reasoner, apiKey, baseUrl, modelId, apiMode,
+                    timeoutSeconds.toIntOrNull() ?: 0, thinkingMode, reasoningEffort),
+                AppSettings.validateConnection(reasoner, apiKey, baseUrl, modelId, apiMode,
+                    timeoutSeconds.toIntOrNull() ?: 0),
+            )
             Button(
                 onClick = {
                     val timeout = if (reasoner == "openai") timeoutSeconds.toIntOrNull()

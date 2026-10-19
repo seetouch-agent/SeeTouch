@@ -50,6 +50,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        TaskController.pause()
         overlayScope.cancel()
         progressOverlay?.close()
         progressOverlay = null
@@ -58,10 +59,13 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        event ?: return
         if (windows.any { it.id == event.windowId &&
                 it.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }) return
         val pkg = event.packageName?.toString() ?: return
+        if (TaskController.state.value.status == com.seetouch.app.task.TaskStatus.RUNNING && pkg != packageName)
+            takeoverReason()?.let { TaskController.requestTakeover(it) }
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         // 输入法窗口不代表前台 app 切换
         if (pkg.contains("inputmethod") || pkg.contains(".ime")) return
         foregroundPackage = pkg
@@ -79,6 +83,35 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     fun currentPackage(): String? =
         foregroundPackage ?: rootInActiveWindow?.packageName?.toString()
 
+    fun takeoverReason(): String? {
+        val root = rootInActiveWindow ?: return null
+        if (root.packageName?.toString() == packageName) return null
+        val nodes = mutableListOf<SensitiveScreenDetector.Node>()
+        var visited = 0
+        fun visit(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 30 || visited >= 300) return
+            visited++
+            if (node.isVisibleToUser) nodes.add(SensitiveScreenDetector.Node(
+                if (node.isPassword) "" else listOfNotNull(node.text, node.contentDescription, node.hintText)
+                    .joinToString(" ") { it.take(512).toString() },
+                node.isPassword, node.isEditable))
+            for (i in 0 until node.childCount) {
+                if (visited >= 300) break
+                visit(node.getChild(i), depth + 1)
+            }
+        }
+        visit(root, 0)
+        return SensitiveScreenDetector.reason(nodes)
+    }
+
+    internal fun <T> controlled(operation: () -> T): T = TaskController.withDeviceAction {
+        if (TaskController.isRunning) takeoverReason()?.let {
+            TaskController.requestTakeover(it)
+            error("Sensitive screen requires human takeover")
+        }
+        operation()
+    }
+
     // ------------------------- 截图 -------------------------
 
     /** 截取默认显示屏,返回软件位图;失败返回 null。 */
@@ -88,7 +121,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         val latch = CountDownLatch(1)
         var bitmap: Bitmap? = null
         val mainExecutor: Executor = mainExecutor
-        takeScreenshot(
+        controlled { takeScreenshot(
             Display.DEFAULT_DISPLAY,
             mainExecutor,
             object : TakeScreenshotCallback {
@@ -110,7 +143,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
                     latch.countDown()
                 }
             }
-        )
+        ) }
         latch.await(SCREENSHOT_TIMEOUT_S, TimeUnit.SECONDS)
         return bitmap
     }
@@ -144,7 +177,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     private fun dispatchUnobstructedGesture(gesture: GestureDescription): Boolean {
         val latch = CountDownLatch(1)
         var ok = false
-        val dispatched = dispatchGesture(
+        val dispatched = controlled { dispatchGesture(
             gesture,
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription?) {
@@ -157,7 +190,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
                 }
             },
             null,
-        )
+        ) }
         if (!dispatched) return false
         latch.await(GESTURE_TIMEOUT_S, TimeUnit.SECONDS)
         return ok
@@ -170,12 +203,16 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         val node = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             ?: findEditableNode(rootInActiveWindow)
             ?: return false
+        if (node.isPassword && TaskController.isRunning) {
+            TaskController.requestTakeover("检测到密码输入，请手动完成")
+            return false
+        }
         val args = Bundle().apply {
             putCharSequence(
                 AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text
             )
         }
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        return controlled { node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) }
     }
 
     private fun findEditableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -189,9 +226,16 @@ class SeeTouchAccessibilityService : AccessibilityService() {
 
     // ------------------------- 全局导航 -------------------------
 
-    fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
+    fun pressBack(): Boolean = controlled { performGlobalAction(GLOBAL_ACTION_BACK) }
 
-    fun pressHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
+    fun pressHome(): Boolean = controlled { performGlobalAction(GLOBAL_ACTION_HOME) }
+
+    /** Explicit notification-control navigation, outside automated task actions. */
+    fun dismissNotificationShade() {
+        if (android.os.Build.VERSION.SDK_INT >= 31) performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+        else if (rootInActiveWindow?.packageName?.toString()?.contains(".systemui") == true)
+            performGlobalAction(GLOBAL_ACTION_BACK)
+    }
 
     private fun <T> withoutProgressOverlay(operation: () -> T): T {
         val overlay = progressOverlay

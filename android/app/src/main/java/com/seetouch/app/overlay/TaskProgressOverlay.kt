@@ -23,6 +23,8 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.EditText
+import android.view.inputmethod.InputMethodManager
 import androidx.core.view.doOnLayout
 import com.seetouch.app.task.TaskController
 import com.seetouch.app.task.TaskProgressDisplay
@@ -73,14 +75,41 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
         collapsed = !collapsed
         render(lastState)
     }
-    private val allow = button("允许执行") { TaskController.respondToConfirmation(true) }
-    private val reject = button("拒绝") { TaskController.respondToConfirmation(false) }
+    private val allow = button("允许执行") {
+        lastState.pendingConfirmation?.let { TaskController.respondToConfirmation(true, it.id) }
+    }
+    private val reject = button("拒绝") {
+        lastState.pendingConfirmation?.let { TaskController.respondToConfirmation(false, it.id) }
+    }
     private val returnToApp = button("回到应用") {
         service.packageManager.getLaunchIntentForPackage(service.packageName)?.let {
             service.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
     private val dismiss = button("关闭") { hide() }
+    private val pauseResume = button("暂停") {
+        if (lastState.status in setOf(TaskStatus.PAUSED, TaskStatus.TAKEOVER)) TaskController.resume()
+        else TaskController.pause()
+    }
+    private val stop = button("终止") { TaskController.stop() }
+    private val takeover = button("我来操作") { TaskController.requestTakeover() }
+    private val controls = LinearLayout(service).apply {
+        listOf(pauseResume, stop, takeover).forEach { addView(it, LinearLayout.LayoutParams(0, dp(42), 1f)) }
+    }
+    private val answer = EditText(service).apply {
+        hint = "输入回答"; setTextColor(Color.WHITE); setHintTextColor(Color.LTGRAY)
+        textSize = 13f; maxLines = 3
+        inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+        setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                submitCurrentAnswer(); true
+            } else false
+        }
+    }
+    private val questionContent = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
+    private val questionPanel = ScrollView(service).apply { addView(questionContent) }
+    private var questionId: Long? = null
     private val actions = LinearLayout(service).apply {
         orientation = LinearLayout.HORIZONTAL
         listOf(allow, reject, returnToApp, dismiss).forEach {
@@ -118,6 +147,8 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
         root.addView(count)
         root.addView(busy, LinearLayout.LayoutParams(-1, dp(3)).apply { topMargin = dp(8) })
         root.addView(actions)
+        root.addView(questionPanel, LinearLayout.LayoutParams(-1, dp(180)))
+        root.addView(controls)
     }
 
     fun render(state: TaskUiState) {
@@ -126,29 +157,55 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
         handler.removeCallbacks(finishHide)
         if (state.status == TaskStatus.IDLE) { hide(); return }
         val display = TaskProgressDisplay.from(state)
-        val compact = collapsed && display.confirmation == null
+        val question = state.pendingQuestion
+        val fullPrompt = display.confirmation != null || question != null
+        val compact = collapsed && display.confirmation == null && question == null
         title.text = display.title
         title.setTextColor(if (display.confirmation != null) Color.rgb(255, 207, 112) else Color.WHITE)
         detail.text = display.detail
-        detail.maxLines = if (display.confirmation != null) Int.MAX_VALUE else 3
-        detail.ellipsize = if (display.confirmation != null) null else TextUtils.TruncateAt.END
+        detail.maxLines = if (fullPrompt) Int.MAX_VALUE else 3
+        detail.ellipsize = if (fullPrompt) null else TextUtils.TruncateAt.END
         val metrics = windowManager.currentWindowMetrics
         val bars = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars())
         val promptHeight = minOf(dp(140),
             (metrics.bounds.height() - bars.top - bars.bottom - dp(160)).coerceAtLeast(dp(48)))
         detailContainer.layoutParams = LinearLayout.LayoutParams(-1,
-            if (display.confirmation != null) promptHeight else LinearLayout.LayoutParams.WRAP_CONTENT)
+            if (fullPrompt) promptHeight else LinearLayout.LayoutParams.WRAP_CONTENT)
         detailContainer.visibility = if (compact) View.GONE else View.VISIBLE
         count.text = display.stepCount
         count.visibility = if (compact) View.GONE else View.VISIBLE
         busy.visibility = if (display.running && display.confirmation == null) View.VISIBLE else View.GONE
         collapse.text = if (collapsed) "展开" else "收起"
-        collapse.visibility = if (display.confirmation == null && display.running) View.VISIBLE else View.GONE
+        collapse.visibility = if (display.confirmation == null && display.active && question == null) View.VISIBLE else View.GONE
         allow.visibility = if (display.confirmation != null) View.VISIBLE else View.GONE
         reject.visibility = allow.visibility
-        returnToApp.visibility = if (!display.running) View.VISIBLE else View.GONE
-        dismiss.visibility = returnToApp.visibility
-        actions.visibility = if (display.confirmation != null || !display.running) View.VISIBLE else View.GONE
+        returnToApp.visibility = if (!display.running || question != null) View.VISIBLE else View.GONE
+        returnToApp.text = if (question != null) "应用 / 语音回答" else "回到应用"
+        dismiss.visibility = if (!display.active) View.VISIBLE else View.GONE
+        actions.visibility = if (display.confirmation != null || !display.running || question != null) View.VISIBLE else View.GONE
+        controls.visibility = if (display.active && state.status != TaskStatus.STOPPED) View.VISIBLE else View.GONE
+        pauseResume.text = if (state.status in setOf(TaskStatus.PAUSED, TaskStatus.TAKEOVER)) "继续" else "暂停"
+        takeover.visibility = if (state.status == TaskStatus.TAKEOVER) View.GONE else View.VISIBLE
+        questionPanel.visibility = if (question != null) View.VISIBLE else View.GONE
+        if (question?.id != questionId) {
+            questionId = question?.id
+            questionContent.removeAllViews()
+            if (question != null) {
+                answer.setText("")
+                (answer.parent as? android.view.ViewGroup)?.removeView(answer)
+                questionContent.addView(answer)
+                question.options.forEach { option ->
+                    questionContent.addView(button(option) { answer.setText(option) })
+                }
+                questionContent.addView(button("提交回答") { submitCurrentAnswer() })
+            } else {
+                service.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken, 0)
+                answer.clearFocus()
+            }
+        }
+        params.flags = if (question != null) params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            else params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         params.width = dp(if (compact) 200 else 248)
         visibility.requested = true
         if (!added) {
@@ -163,7 +220,7 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
         }
         applyVisibility()
         root.doOnLayout { updatePosition() }
-        if (!display.running) handler.postDelayed(finishHide, 6000)
+        if (!display.active) handler.postDelayed(finishHide, 6000)
     }
 
     /** Called on the Runner thread. Wait for the hidden surface to render before capture/input. */
@@ -267,6 +324,15 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
 
     private fun label(size: Float, color: Int) = TextView(service).apply {
         textSize = size; setTextColor(color)
+    }
+
+    private fun submitCurrentAnswer() {
+        val question = lastState.pendingQuestion ?: return
+        val value = answer.text.toString()
+        if (value.isBlank()) return
+        service.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken, 0)
+        answer.clearFocus()
+        handler.postDelayed({ TaskController.submitAnswer(value, question.id) }, 250)
     }
 
     private fun button(caption: String, action: () -> Unit) = Button(service).apply {

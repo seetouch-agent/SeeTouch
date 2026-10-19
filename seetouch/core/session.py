@@ -80,13 +80,22 @@ class Session:
         self._start_ts: float = time.time()
         self._tokens_in: int = 0
         self._tokens_out: int = 0
+        self._pending_interactions: list[dict[str, Any]] = []
 
     # ----------------------- 保存产物 -----------------------
 
-    def save_screenshot(self, step: int, image: Image.Image) -> Path:
-        path = self.dir / f"step_{step:03d}.png"
+    def save_screenshot(self, step: int, image: Image.Image, attempt: int = 0) -> Path:
+        suffix = f"_retry_{attempt}" if attempt else ""
+        path = self.dir / f"step_{step:03d}{suffix}.png"
         image.save(path, format="PNG")
         return path
+
+    def record_interaction(self, event: dict[str, Any]) -> None:
+        """Questions/control boundaries only; never records a human's device operations."""
+        record = {"timestamp": time.time(), **event}
+        self._pending_interactions.append(record)
+        with (self.dir / "interactions.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def record_step(
         self,
@@ -213,9 +222,11 @@ class Session:
             "prompt_text": prompt_text,
             "reasoning_time": reasoning_time,
             "execution_time": execution_time,
+            "interactions": self._pending_interactions[:],
         }
         try:
             with self.trace_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(line, ensure_ascii=False) + "\n")
+            self._pending_interactions.clear()
         except Exception as exc:
             logger.warning("append trace failed: %s", exc)

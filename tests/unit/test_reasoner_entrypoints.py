@@ -117,7 +117,7 @@ def test_android_passes_protocol_timeout_and_effort(android_entry, mode):
     assert reasoner._config.reasoning_effort == "high"
     constructor.assert_called_once_with(
         api_key="test-key", base_url="https://proxy.example/custom/v1",
-        timeout=120.0, max_retries=1,
+        timeout=120.0, max_retries=0,
     )
     assert reasoner._config.model_id == "vision"
 

@@ -111,6 +111,18 @@ class AppSettings internal constructor(private val prefs: SharedPreferences) {
         }.toString()
 
     companion object {
+        fun connectionConfigJson(provider: String, key: String, url: String, model: String,
+            mode: String, timeout: Int, thinking: String, effort: String): String = JSONObject()
+            .put("reasoner", provider).put("api_key", key.trim()).put("model_id", model.trim())
+            .apply {
+                if (provider == "doubao") {
+                    put("api_url", url.trim().trimEnd('/')); put("thinking_mode", thinking)
+                } else {
+                    put("base_url", url.trim().trimEnd('/')); put("api_mode", mode)
+                    put("timeout", timeout); put("reasoning_effort", effort)
+                }
+            }.toString()
+
         fun validateConnection(
             provider: String, key: String, url: String, model: String,
             mode: String, timeout: Int,

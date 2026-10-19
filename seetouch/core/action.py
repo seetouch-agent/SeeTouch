@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-ActionType = Literal["CLICK", "TYPE", "SCROLL", "OPEN", "BACK", "WAIT", "COMPLETE"]
+ActionType = Literal["CLICK", "TYPE", "SCROLL", "OPEN", "BACK", "WAIT", "COMPLETE", "ASK_USER", "TAKE_OVER"]
 
 
 ACTION_CLICK: ActionType = "CLICK"
@@ -19,9 +19,12 @@ ACTION_OPEN: ActionType = "OPEN"
 ACTION_BACK: ActionType = "BACK"
 ACTION_WAIT: ActionType = "WAIT"
 ACTION_COMPLETE: ActionType = "COMPLETE"
+ACTION_ASK_USER: ActionType = "ASK_USER"
+ACTION_TAKE_OVER: ActionType = "TAKE_OVER"
 
 VALID_ACTIONS: frozenset[str] = frozenset(
-    {ACTION_CLICK, ACTION_TYPE, ACTION_SCROLL, ACTION_OPEN, ACTION_BACK, ACTION_WAIT, ACTION_COMPLETE}
+    {ACTION_CLICK, ACTION_TYPE, ACTION_SCROLL, ACTION_OPEN, ACTION_BACK, ACTION_WAIT,
+     ACTION_COMPLETE, ACTION_ASK_USER, ACTION_TAKE_OVER}
 )
 
 
@@ -65,6 +68,17 @@ class Action:
             seconds = self.parameters.get("seconds")
             if seconds is not None and not isinstance(seconds, (int, float)):
                 raise ValueError("WAIT.seconds must be number if present")
+        elif self.type == ACTION_ASK_USER:
+            question = self.parameters.get("question")
+            options = self.parameters.get("options", [])
+            if not isinstance(question, str) or not question.strip():
+                raise ValueError("ASK_USER requires a nonempty question")
+            if not isinstance(options, list) or not all(isinstance(x, str) and x.strip() for x in options):
+                raise ValueError("ASK_USER.options must be a list of nonempty strings")
+        elif self.type == ACTION_TAKE_OVER:
+            reason = self.parameters.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError("TAKE_OVER requires a nonempty reason")
         # COMPLETE: no params required
 
 

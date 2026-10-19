@@ -60,6 +60,13 @@ class NativeAndroidController:
 
     # ------------------------- DeviceController API -------------------------
 
+    def set_control_revision(self, revision: int) -> None:
+        self._b.expectRevision(revision)
+
+    def takeover_reason(self) -> str | None:
+        reason = self._b.takeoverReason()
+        return str(reason) if reason else None
+
     def screenshot(self) -> Image.Image:
         try:
             png = bytes(self._b.screenshotPng())

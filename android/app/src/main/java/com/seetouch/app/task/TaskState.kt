@@ -3,7 +3,9 @@ package com.seetouch.app.task
 import org.json.JSONObject
 
 /** 任务生命周期状态。 */
-enum class TaskStatus { IDLE, RUNNING, COMPLETED, ABORTED, ERROR }
+enum class TaskStatus { IDLE, RUNNING, PAUSED, WAITING_USER, TAKEOVER, STOPPED, COMPLETED, ABORTED, ERROR }
+
+data class PendingQuestion(val id: Long, val question: String, val options: List<String>)
 
 /** 单步执行摘要(task_entry.py _step_summary 的 Kotlin 映射)。 */
 data class StepInfo(
@@ -38,7 +40,7 @@ data class StepInfo(
 }
 
 /** 敏感动作待确认信息。 */
-data class PendingConfirmation(val message: String) {
+data class PendingConfirmation(val message: String, val id: Long = 0) {
     companion object {
         fun fromRunnerMessage(message: String): PendingConfirmation = PendingConfirmation(
             message.lineSequence().filterNot {
@@ -60,4 +62,8 @@ data class TaskUiState(
     val errorDetail: String? = null,
     val maxSteps: Int = 45,
     val progress: TaskProgress = TaskProgress(),
+    val workerActive: Boolean = false,
+    val pendingQuestion: PendingQuestion? = null,
+    val controlReason: String = "",
+    val taskGeneration: Long = 0,
 )

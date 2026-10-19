@@ -9,19 +9,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
 def replay(session_dir: Path) -> int:
     trace_path = session_dir / "trace.jsonl"
     summary_path = session_dir / "summary.json"
-    if not trace_path.exists():
+    interactions_path = session_dir / "interactions.jsonl"
+    if not trace_path.exists() and not interactions_path.exists():
         print(f"trace.jsonl not found in {session_dir}", file=sys.stderr)
         return 1
 
     print(f"=== Session: {session_dir} ===")
 
-    for line in trace_path.read_text(encoding="utf-8").splitlines():
+    for line in trace_path.read_text(encoding="utf-8").splitlines() if trace_path.exists() else []:
         try:
             rec = json.loads(line)
         except Exception:
@@ -49,6 +51,24 @@ def replay(session_dir: Path) -> int:
                 print(f"  备注: {n}")
         if screenshot:
             print(f"  截图: {screenshot}")
+
+    if interactions_path.exists():
+        print("\n=== 控制与交互记录 ===")
+        labels = {"paused": "已暂停", "running": "继续执行", "waiting_user": "等待回答",
+                  "takeover_start": "开始人工接管", "takeover_end": "结束人工接管",
+                  "stopped": "终止", "user_stopped": "任务已终止",
+                  "ASK_USER": "追问", "user_answer": "用户回答", "TAKE_OVER": "请求人工接管"}
+        for line in interactions_path.read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+                label = labels.get(event.get("type"))
+                if label is None:
+                    continue
+                when = datetime.fromtimestamp(float(event["timestamp"])).isoformat(timespec="seconds")
+            except (ValueError, TypeError, KeyError):
+                continue
+            detail = event.get("answer") or event.get("question") or event.get("reason") or ""
+            print(f"  {when} Step {event.get('step', '?')} {label} {detail}")
 
     if summary_path.exists():
         print("\n=== Summary ===")

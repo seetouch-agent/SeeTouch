@@ -109,3 +109,30 @@ def test_confirmation_happens_before_any_device_action(entry, monkeypatch, appro
     else:
         device.click.assert_not_called()
         assert "executing" not in [e["phase"] for e in events]
+
+
+@pytest.mark.parametrize("kind", ["ASK_USER", "TAKE_OVER"])
+def test_interaction_bridge_returns_to_fresh_observation(entry, monkeypatch, kind):
+    module, device = entry
+    prompts, requests, steps = [], [], []
+    params = {"question": "选哪个？", "options": ["甲", "乙"]} if kind == "ASK_USER" else {"reason": "请登录"}
+    revision = [0]
+    def predict(instruction, *_):
+        prompts.append(instruction)
+        return ActionOutput(Action(kind, params)) if len(prompts) == 1 else ActionOutput(Action("COMPLETE"))
+    reasoner = SimpleNamespace(predict=predict, _client=Mock())
+    monkeypatch.setattr(module, "_create_reasoner", lambda _: reasoner)
+    def interaction(request_json):
+        requests.append(json.loads(request_json))
+        assert device.screenshot.call_count == 1
+        device.click.assert_not_called()
+        revision[0] += 2
+        return json.dumps({"status": "answered", "answer": "乙"} if kind == "ASK_USER" else {"status": "resumed"})
+    result = json.loads(module.run_task("打开时钟", "{}", lambda x: steps.append(json.loads(x)), None, None,
+        lambda _: json.dumps({"mode": "running", "revision": revision[0]}), interaction))
+    assert result["completed"]
+    assert requests == [{"type": kind, **params}]
+    assert device.screenshot.call_count == 2
+    if kind == "ASK_USER":
+        assert "回答：乙" in prompts[1] and "回答：乙" in steps[0]["notes"][0]
+    reasoner._client.close.assert_called_once()

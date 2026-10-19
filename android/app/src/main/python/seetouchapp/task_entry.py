@@ -35,6 +35,8 @@ def run_task(
     step_callback=None,
     confirm_callback=None,
     progress_callback=None,
+    control_callback=None,
+    interaction_callback=None,
 ) -> str:
     """执行一次自然语言任务,返回 JSON 结果摘要。
 
@@ -52,6 +54,7 @@ def run_task(
     try:
         return _run_task(
             instruction, json.loads(config_json), step_callback, confirm_callback, progress_callback,
+            control_callback, interaction_callback,
         )
     except Exception:
         return json.dumps(
@@ -66,7 +69,8 @@ def _create_reasoner(config: dict):
     if name == "doubao":
         from seetouch.reasoning.doubao import DoubaoConfig, DoubaoReasoner
 
-        kwargs = {"api_key": config["api_key"]}
+        kwargs = {"api_key": config["api_key"], "max_retries": 0,
+                  "timeout": float(config.get("timeout", 60))}
         for key in ("model_id", "api_url", "thinking_mode"):
             if config.get(key):
                 kwargs[key] = config[key]
@@ -74,7 +78,8 @@ def _create_reasoner(config: dict):
     if name == "openai":
         from seetouch.reasoning.openai import OpenAIConfig, OpenAIReasoner
 
-        kwargs = {"api_key": config["api_key"], "model_id": config.get("model_id", "")}
+        kwargs = {"api_key": config["api_key"], "model_id": config.get("model_id", ""),
+                  "max_retries": 0}
         for key in ("base_url", "reasoning_effort", "api_mode"):
             if config.get(key):
                 kwargs[key] = config[key]
@@ -115,10 +120,12 @@ def _progress_bus(callback):
     return bus
 
 
-def _run_task(instruction, config: dict, step_callback, confirm_callback, progress_callback=None) -> str:
+def _run_task(instruction, config: dict, step_callback, confirm_callback, progress_callback=None,
+              control_callback=None, interaction_callback=None) -> str:
     from com.seetouch.app.bridge import DeviceBridge  # type: ignore[import-not-found]
 
     from seetouch.core.runner import Runner
+    from seetouch.core.control import ExecutionControl, RunStopped
     from seetouch.core.task import Task
     from seetouch.device.android_native.controller import NativeAndroidController
     from seetouch.safety.guard import Guard
@@ -138,7 +145,24 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
     _notify_progress(progress_callback, "starting", 0)
     # 先回桌面:agent 跟手机同机运行,不先退到后台的话
     # 首张截图会是 SeeTouch 自己的界面,模型会误判为"应用正在处理"而反复 WAIT
-    device.go_home()
+    control = ExecutionControl(lambda: json.loads(str(_call(control_callback, "{}")))) if control_callback else None
+    if control:
+        try:
+            device.set_control_revision(control.checkpoint())
+            device.go_home()
+        except RunStopped:
+            pass
+        except Exception:
+            # A pause can race the initial HOME. Runner will wait/reobserve before any work.
+            if control.snapshot()[0] == "running":
+                raise
+    else:
+        device.go_home()
+
+    def interact(request: dict) -> dict:
+        if interaction_callback is None:
+            return {"status": "stopped"}
+        return json.loads(str(_call(interaction_callback, json.dumps(request, ensure_ascii=False))))
 
     runner = Runner(
         device=device,
@@ -146,33 +170,45 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
         guard=Guard(prompt_fn=prompt),
         runs_dir=runs_dir,
         event_bus=_progress_bus(progress_callback) if progress_callback is not None else None,
+        control=control, interaction=interact,
     )
 
     task = Task(instruction=instruction, max_steps=max_steps)
     runner.start(task)
-    next_step = 1
-    while not runner.is_finished:
-        _notify_progress(progress_callback, "capturing", next_step)
-        result = runner.step()
-        if step_callback is not None:
-            _call(step_callback, json.dumps(_step_summary(result), ensure_ascii=False))
-        next_step += 1
+    try:
+        next_step = 1
+        while not runner.is_finished:
+            _notify_progress(progress_callback, "capturing", next_step)
+            result = runner.step()
+            if step_callback is not None:
+                _call(step_callback, json.dumps(_step_summary(result), ensure_ascii=False))
+            next_step += 1
 
-    summary = runner.session.summarize()
-    return json.dumps(
-        {
-            "completed": summary.completed,
-            "aborted_reason": summary.aborted_reason,
-            "total_steps": summary.total_steps,
-            "task_id": task.task_id,
-            "runs_dir": runs_dir,
-            "tokens": {
-                "input": summary.total_input_tokens,
-                "output": summary.total_output_tokens,
+        summary = runner.session.summarize()
+        return json.dumps(
+            {
+                "completed": summary.completed,
+                "aborted_reason": summary.aborted_reason,
+                "total_steps": summary.total_steps,
+                "task_id": task.task_id,
+                "runs_dir": runs_dir,
+                "tokens": {
+                    "input": summary.total_input_tokens,
+                    "output": summary.total_output_tokens,
+                },
             },
-        },
-        ensure_ascii=False,
-    )
+            ensure_ascii=False,
+        )
+
+    finally:
+        if control:
+            control.snapshot()
+        client = getattr(reasoner, "_client", None)
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                logger.warning("closing model client failed")
 
 
 def _call(cb, arg):

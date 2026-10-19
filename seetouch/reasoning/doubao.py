@@ -12,7 +12,8 @@ from typing import Any
 
 from PIL import Image
 
-from ..core.action import ACTION_COMPLETE, ACTION_WAIT, Action, ActionOutput
+from ..core.action import ACTION_WAIT, Action, ActionOutput
+from ..core.exceptions import VLMAPIError
 from ..perception.screen import encode_image_data_url
 from .base import StepRecord
 from .parser import ParseError, parse_model_output
@@ -42,6 +43,8 @@ class DoubaoConfig:
     top_p: float | None = None
     thinking_mode: str = DEFAULT_THINKING_MODE
     history_window: int = 8
+    timeout: float = 60.0
+    max_retries: int = 2
 
     def __post_init__(self) -> None:
         if self.thinking_mode not in THINKING_MODES:
@@ -73,7 +76,8 @@ class DoubaoReasoner:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("openai package missing. run: pip install openai") from exc
-        self._client = OpenAI(base_url=self._config.api_url, api_key=self._config.api_key)
+        self._client = OpenAI(base_url=self._config.api_url, api_key=self._config.api_key,
+                              timeout=self._config.timeout, max_retries=self._config.max_retries)
 
     def predict(
         self,
@@ -93,13 +97,7 @@ class DoubaoReasoner:
             usage = self._extract_usage(response)
         except Exception as exc:
             logger.error("doubao api call failed: %s", exc)
-            return ActionOutput(
-                action=Action(type=ACTION_COMPLETE, parameters={}),
-                raw_output=f"Error: {type(exc).__name__}: {exc}",
-                screen_summary="",
-                action_summary="API 调用失败,任务终止",
-                prompt_text=prompt_text,
-            )
+            raise VLMAPIError(f"{type(exc).__name__}: {exc}") from exc
 
         summary = extract_summary_fields(raw_output)
 

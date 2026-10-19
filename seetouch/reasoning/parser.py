@@ -18,6 +18,8 @@ from ..core.action import (
     ACTION_SCROLL,
     ACTION_TYPE,
     ACTION_WAIT,
+    ACTION_ASK_USER,
+    ACTION_TAKE_OVER,
     VALID_ACTIONS,
     Action,
 )
@@ -46,6 +48,8 @@ def parse_model_output(raw_text: str, image_size: Tuple[int, int]) -> Action:
             action = _normalize_parsed_action(parsed, image_size)
             if action is not None:
                 return action
+            if isinstance(parsed, dict) and str(parsed.get("action", "")).upper() in VALID_ACTIONS:
+                raise ParseError(text, "invalid parameters for structured action")
 
     simple = _parse_simple_action(text, image_size)
     if simple is not None:
@@ -123,6 +127,16 @@ def _normalize_parsed_action(
 
     if action_type == ACTION_COMPLETE:
         return Action(type=ACTION_COMPLETE, parameters={})
+
+    if action_type in (ACTION_ASK_USER, ACTION_TAKE_OVER):
+        action = Action(type=action_type, parameters={
+            "question": params.get("question"), "options": params.get("options", []),
+        } if action_type == ACTION_ASK_USER else {"reason": params.get("reason")})
+        try:
+            action.validate()
+        except ValueError:
+            return None
+        return action
 
     if action_type == ACTION_BACK:
         return Action(type=ACTION_BACK, parameters={})

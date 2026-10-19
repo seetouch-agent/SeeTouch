@@ -32,6 +32,7 @@ data class TaskProgressDisplay(
     val stepCount: String,
     val running: Boolean,
     val confirmation: PendingConfirmation?,
+    val active: Boolean = running,
 ) {
     companion object {
         fun from(state: TaskUiState): TaskProgressDisplay {
@@ -42,12 +43,19 @@ data class TaskProgressDisplay(
                 TaskStatus.IDLE -> "就绪"
                 TaskStatus.RUNNING -> if (state.progress.step > 0)
                     "第 ${state.progress.step} 步 · $phase" else phase
+                TaskStatus.PAUSED -> "已暂停"
+                TaskStatus.WAITING_USER -> "等待你的回答"
+                TaskStatus.TAKEOVER -> "人工接管中"
+                TaskStatus.STOPPED -> "已终止"
                 TaskStatus.COMPLETED -> "任务完成"
                 TaskStatus.ABORTED -> "任务中止"
                 TaskStatus.ERROR -> "任务出错"
             }
             val detail = when {
                 confirmation != null -> confirmation.message
+                state.pendingQuestion != null -> state.pendingQuestion.question
+                state.status == TaskStatus.TAKEOVER -> state.controlReason + "；完成后点继续。接管期间不截图、不上传、不操作。"
+                state.status == TaskStatus.PAUSED -> state.controlReason
                 state.status == TaskStatus.ERROR -> "请回到 SeeTouch 查看错误详情"
                 !running -> state.resultSummary.orEmpty()
                 state.progress.actionSummary.isNotBlank() -> state.progress.actionSummary
@@ -55,7 +63,8 @@ data class TaskProgressDisplay(
             }
             return TaskProgressDisplay(title, detail,
                 "已记录 ${state.steps.size} 步 · 最多 ${state.maxSteps} 步",
-                running, confirmation)
+                running, confirmation, state.workerActive || state.status in setOf(
+                    TaskStatus.RUNNING, TaskStatus.PAUSED, TaskStatus.WAITING_USER, TaskStatus.TAKEOVER))
         }
     }
 }

@@ -11,6 +11,8 @@ import logging
 import time
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
+from .control import ExecutionControl, ReobserveRequired, RunStopped
 
 from .event_bus import (
     EventBus,
@@ -27,6 +29,8 @@ from ..core.action import (
     ACTION_SCROLL,
     ACTION_TYPE,
     ACTION_WAIT,
+    ACTION_ASK_USER,
+    ACTION_TAKE_OVER,
     Action,
 )
 from ..device.base import (
@@ -73,6 +77,8 @@ class Runner:
         max_open_misses: int = 3,
         event_bus: EventBus | None = None,
         action_settle_seconds: float = 1.0,
+        control: ExecutionControl | None = None,
+        interaction: Callable[[dict], dict] | None = None,
     ):
         self.device = device
         self.reasoner = reasoner
@@ -83,6 +89,9 @@ class Runner:
         self.max_open_misses = max_open_misses
         self._event_bus = event_bus
         self.action_settle_seconds = action_settle_seconds
+        self.control = control
+        self.interaction = interaction
+        self._interaction_context: list[str] = []
 
         # 运行状态(start() 初始化,step() 推进)
         self._session: Session | None = None
@@ -99,6 +108,9 @@ class Runner:
         """初始化一次任务执行。后续通过 step() 逐步推进。"""
         self._task = task
         self._session = Session(task, base_dir=self.runs_dir)
+        self._interaction_context = []
+        if self.control:
+            self.control.event_sink = self._record_control_event
         self._current_step = 0
         self._finished = False
         self._pending_visual_request = None
@@ -125,13 +137,29 @@ class Runner:
 
         self._current_step += 1
         step = self._current_step
+        attempt = 0
+        while True:
+            try:
+                revision = self._checkpoint()
+                self._check_takeover()
+                return self._step_once(step, revision, attempt)
+            except ReobserveRequired:
+                attempt += 1
+            except RunStopped:
+                return self._stopped_result(step)
+            except InteractionUnavailable:
+                return self._stopped_result(step, "interaction_unavailable")
+
+    def _step_once(self, step: int, revision: int | None, attempt: int) -> StepResult:
         task = self._task
         session = self._session
+        assert task is not None and session is not None
 
         # 1. 截屏
         try:
             screenshot = self.device.screenshot()
         except Exception as exc:
+            self._checkpoint(revision)
             logger.error("screenshot failed: %s", exc)
             session.mark_aborted(f"screenshot_failed: {exc}")
             self._finished = True
@@ -150,17 +178,23 @@ class Runner:
 
         # 降分辨率:上传给 VLM、落盘日志统一用这张 720P 图。坐标走归一化,
         # 设备层用真实分辨率换算像素,缩放不影响点击精度,只省带宽与磁盘。
+        self._checkpoint(revision)
         screenshot = downscale(screenshot)
-        screenshot_path = session.save_screenshot(step, screenshot)
+        screenshot_path = session.save_screenshot(step, screenshot, attempt)
 
         self._emit(STEP_SCREENSHOT_TAKEN, step=step, screenshot=screenshot)
 
         # 2. 推理
         self._emit(STEP_REASONING_STARTED, step=step)
         t0 = time.perf_counter()
+        self._checkpoint(revision)
         try:
-            out = self.reasoner.predict(task.instruction, screenshot, session.history)
+            instruction = task.instruction
+            if self._interaction_context:
+                instruction += "\n\n用户补充（以用户回答为准）：\n" + "\n".join(self._interaction_context)
+            out = self.reasoner.predict(instruction, screenshot, session.history)
         except VLMAPIError as exc:
+            self._checkpoint(revision)
             from .action import ActionOutput
 
             reason = f"reasoning_failed: {exc}"
@@ -185,6 +219,16 @@ class Runner:
                 terminal=True, terminal_reason=reason,
             )
         reasoning_time = time.perf_counter() - t0
+        session.record_interaction({"type": "model_decision", "step": step,
+                                    "action": out.action.type, "parameters": out.action.parameters,
+                                    "raw_output": out.raw_output, "screenshot": str(screenshot_path)})
+        if self.control and self.control.snapshot() != ("running", revision):
+            session.record_interaction({
+                "type": "held_decision", "step": step, "action": out.action.type,
+                "parameters": out.action.parameters, "raw_output": out.raw_output,
+                "screenshot": str(screenshot_path), "executed": False,
+            })
+        self._checkpoint(revision)
         self._emit(
             STEP_REASONING_DONE,
             step=step,
@@ -202,6 +246,38 @@ class Runner:
             "[step %d] action=%s params=%s (%.1fs)",
             step, out.action.type, out.action.parameters, reasoning_time,
         )
+
+        if out.action.type in (ACTION_ASK_USER, ACTION_TAKE_OVER):
+            if self.interaction is None:
+                raise InteractionUnavailable()
+            request = {"type": out.action.type, **out.action.parameters}
+            session.record_interaction({**request, "step": step})
+            reply = self.interaction(request)
+            if self.control:
+                self.control.snapshot()  # Drain timestamped question/takeover boundaries before recording the step.
+            if reply.get("status") == "stopped":
+                raise RunStopped()
+            interaction_notes = []
+            if out.action.type == ACTION_ASK_USER and reply.get("status") == "answered":
+                answer = str(reply.get("answer", "")).strip()
+                if answer:
+                    self._interaction_context.append(
+                        f"问题：{out.action.parameters['question']}\n回答：{answer}"
+                    )
+                    session.record_interaction({"type": "user_answer", "step": step,
+                                                "question": out.action.parameters["question"],
+                                                "answer": answer})
+                    interaction_notes.append(f"问题：{out.action.parameters['question']}\n回答：{answer}")
+            session.record_step(step, out, execution_success=None,
+                                screenshot_path=screenshot_path, reasoning_time=reasoning_time,
+                                notes=interaction_notes)
+            if step >= task.max_steps:
+                session.mark_aborted("max_steps_reached")
+                self._finished = True
+            return StepResult(step, screenshot, screenshot_path, out.prompt_text, out.raw_output,
+                              out.reasoning_content, out.action, out.screen_summary, out.action_summary,
+                              None, interaction_notes, out.usage, reasoning_time, 0.0, self._finished,
+                              "max_steps_reached" if self._finished else None)
 
         # 3. COMPLETE 不需要 guard,也不执行任何设备动作
         if out.action.type == ACTION_COMPLETE:
@@ -227,6 +303,7 @@ class Runner:
         # 4. 敏感动作拦截
         if self.guard.needs_confirmation(task, out):
             approved = self.guard.ask(out, screenshot_path=str(screenshot_path))
+            self._checkpoint(revision)
             if not approved:
                 notes = ["user_denied_sensitive_action"]
                 session.record_step(
@@ -253,8 +330,12 @@ class Runner:
         self._emit(STEP_EXECUTING, step=step, action=out.action)
         t1 = time.perf_counter()
         try:
+            self._check_takeover()
+            self._checkpoint(revision)
             self._execute(out.action)
             success = True
+        except (RunStopped, ReobserveRequired):
+            raise
         except OpenAppNotFound as exc:
             self._open_miss_count += 1
             if self._open_miss_count >= self.max_open_misses:
@@ -277,10 +358,12 @@ class Runner:
             notes.append(self._arm_visual_fallback(exc.request))
             success = True
         except DeviceError as exc:
+            self._checkpoint(revision)
             logger.warning("device error at step %d: %s", step, exc)
             notes.append(f"device_error: {exc}")
             success = False
         except Exception as exc:
+            self._checkpoint(revision)
             logger.exception("unexpected error at step %d", step)
             notes.append(f"unexpected_error: {type(exc).__name__}: {exc}")
             success = False
@@ -289,7 +372,7 @@ class Runner:
         # 等待手机界面响应动作后稳定(页面跳转/动画/内容加载),
         # 避免下一轮截图拿到旧画面导致模型误判重复操作。
         if success and out.action.type not in (ACTION_WAIT, ACTION_COMPLETE):
-            time.sleep(self.action_settle_seconds)
+            self._sleep(self.action_settle_seconds)
 
         # 6. 视觉兜底命中检测
         if self._pending_visual_request and out.action.type != ACTION_OPEN:
@@ -314,7 +397,11 @@ class Runner:
         terminal = False
         terminal_reason: str | None = None
 
-        if session.consecutive_failures() >= self.max_consecutive_failures:
+        if self.control and self.control.snapshot()[0] == "stopped":
+            session.mark_aborted("user_stopped")
+            terminal = True
+            terminal_reason = "user_stopped"
+        elif session.consecutive_failures() >= self.max_consecutive_failures:
             logger.warning("too many consecutive failures, abort")
             session.mark_aborted("consecutive_failures")
             terminal = True
@@ -372,6 +459,50 @@ class Runner:
 
     # ======================== 内部 ========================
 
+    def _record_control_event(self, event: dict) -> None:
+        assert self._session is not None
+        self._session.record_interaction({"step": self._current_step, **event})
+
+    def _checkpoint(self, revision: int | None = None) -> int | None:
+        current = self.control.checkpoint(revision) if self.control else None
+        set_revision = getattr(self.device, "set_control_revision", None)
+        if current is not None and callable(set_revision):
+            set_revision(current)
+        return current
+
+    def _sleep(self, seconds: float) -> None:
+        if self.control:
+            self.control.sleep(seconds)
+        else:
+            time.sleep(seconds)
+
+    def _check_takeover(self) -> None:
+        detect = getattr(self.device, "takeover_reason", None)
+        reason = detect() if callable(detect) else None
+        if not isinstance(reason, str) or not reason.strip():
+            return
+        if self.interaction is None:
+            raise InteractionUnavailable()
+        assert self._session is not None
+        self._session.record_interaction({"type": "sensitive_screen", "reason": reason})
+        reply = self.interaction({"type": "TAKE_OVER", "reason": reason})
+        if reply.get("status") == "stopped":
+            raise RunStopped()
+        raise ReobserveRequired()
+
+    def _stopped_result(self, step: int, reason: str = "user_stopped") -> StepResult:
+        from PIL import Image
+
+        assert self._session is not None
+        if self.control:
+            self.control.snapshot()
+        self._session.mark_aborted(reason)
+        self._session.record_interaction({"type": reason, "step": step})
+        self._finished = True
+        return StepResult(step, Image.new("RGB", (1, 1)), None, "", "", "",
+                          Action(type=ACTION_WAIT), "", "用户终止任务" if reason == "user_stopped" else "当前入口不支持交互，请使用安卓 App", None, [], None,
+                          0.0, 0.0, True, reason)
+
     def _emit(self, event_type: str, **data: Any) -> None:
         """向 EventBus 发射事件(如果已配置)。"""
         if self._event_bus:
@@ -425,8 +556,12 @@ class Runner:
             seconds = action.parameters.get("seconds", 1.5)
             seconds = max(0.5, min(5.0, float(seconds)))  # 兜底:0.5-5 秒
             logger.info("WAIT %.1fs", seconds)
-            time.sleep(seconds)
+            self._sleep(seconds)
         elif action.type == ACTION_COMPLETE:
             pass
         else:
             raise DeviceError(f"unknown action type: {action.type}")
+
+
+class InteractionUnavailable(Exception):
+    """A noninteractive host must stop safely rather than guess or claim completion."""
