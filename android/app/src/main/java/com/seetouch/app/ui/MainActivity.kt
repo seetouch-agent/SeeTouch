@@ -57,6 +57,7 @@ import com.seetouch.app.task.TaskController
 import com.seetouch.app.task.TaskExecutionService
 import com.seetouch.app.task.TaskStatus
 import com.seetouch.app.task.TaskUiState
+import com.seetouch.app.task.TaskProgressDisplay
 
 class MainActivity : ComponentActivity() {
 
@@ -193,7 +194,7 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
 private fun StatusLine(state: TaskUiState) {
     val text = when (state.status) {
         TaskStatus.IDLE -> "就绪"
-        TaskStatus.RUNNING -> "执行中：${state.instruction}"
+        TaskStatus.RUNNING -> "${TaskProgressDisplay.from(state).title}：${state.instruction}"
         TaskStatus.COMPLETED -> state.resultSummary ?: "任务完成"
         TaskStatus.ABORTED -> state.resultSummary ?: "任务中止"
         TaskStatus.ERROR -> "出错：${state.errorDetail?.take(300)}"

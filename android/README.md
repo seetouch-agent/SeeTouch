@@ -2,7 +2,7 @@
 
 独立 Android GUI Agent App，同时保留供 PC 导出应用索引的 helper 入口。任务在手机上执行，模型推理调用云端 Doubao 或用户选择的 OpenAI 兼容服务，不是离线模型。
 
-核对日期：2026-10-19；对应包含 OpenAI 双协议支持的工作树。
+核对日期：2026-10-19；对应包含 OpenAI 双协议和执行进度浮窗的工作树。
 
 ## 架构与构建配置
 
@@ -16,7 +16,7 @@ Kotlin/Compose 提供 UI、前台 Service、无障碍截图/手势和 `DeviceBri
 | AGP / Gradle wrapper | 9.2.1 / 9.4.1 |
 | Chaquopy / Python | 17.0.0 / 3.12 |
 | ABI | arm64-v8a、x86_64 |
-| App versionName / versionCode | 1.1 / 2；与 Python 包版本独立 |
+| App versionName / versionCode | 1.2 / 3；与 Python 包版本独立 |
 
 PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，另装 Pillow 和 python-dotenv；没有安装 Gemini SDK。新安装默认使用 OpenAI 兼容接口，支持 Chat Completions 和 Responses。旧 SDK 没有 Responses resource 时，使用其认证 HTTP transport 请求 `/responses`，保留 Base URL 路径、认证、超时及重试；不需要升级 APK 的 SDK。已有豆包设置继续使用原后端。
 
@@ -34,17 +34,25 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下载依赖。APK 大小随构建配置变化。若 Windows 中文路径下的 JVM 测试报告 ClassNotFoundException，可将相同源码复制到英文路径后运行 `testDebugUnitTest assembleDebug lintDebug`，并核对源码哈希。
 
-2026-10-19 验证：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **8 passed**，`assembleDebug` 成功。1.1 / versionCode 2 的 Debug APK 约 68.9 MB，包含两个 ABI；Responses Python 模块已打包，APK 签名验证通过。共享核心的 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **148 passed**；`lintDebug` 通过，0 errors / 26 warnings（版本更新和代码风格建议）。未调用真实模型服务或进行真机回归。
+2026-10-19 验证：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **16 passed**，`assembleDebug` 成功。1.2 / versionCode 3 的 Debug APK 约 69.0 MB，包含两个 ABI；Responses Python 模块已打包，APK 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **154 passed**；`lintDebug` 通过，0 errors / 28 warnings（版本、风格和国际化建议）。未调用真实模型服务或进行真机回归。
 
 ## 独立 App 使用
 
 1. 安装 APK，在系统设置中启用 SeeTouch 无障碍服务。
 2. 在设置页填写 API Key、Base URL 和支持图片输入的模型 ID；Key 默认隐藏，可切换显示。Base URL 保留服务商要求的路径前缀，去掉末尾的 `/chat/completions` 或 `/responses`。OpenAI 模型 ID 必填；豆包留空使用原默认模型。
 3. 按服务商说明选择 Chat Completions 或 Responses；失败后不会自动切换协议。高级设置中可选思考强度、请求超时（5–600 秒）和最大步数（1–200）；模型默认不发送思考参数。两种后端分别保存凭据，原豆包 thinking 选择继续有效。
-4. 回任务页输入指令并开始。入口先回桌面，再由前台 Service 执行。
-5. 回到 SeeTouch 查看步骤时间线；命中敏感动作规则时在 App 内确认，5 分钟未确认默认拒绝。
+4. 回任务页输入指令并开始。入口先回桌面，再由前台 Service 执行；进度浮窗会出现在目标应用上方，显示当前步骤、观察/思考/执行阶段及操作摘要。拖动标题可移动，点“收起/展开”可切换大小。
+5. 命中敏感动作规则时，浮窗会展开完整的可滚动确认信息，只有点“允许执行”后才继续；也可拒绝，5 分钟未确认默认拒绝。App 内的确认弹窗仍可使用。任务结束后浮窗显示结果，6 秒后自动关闭；完整步骤时间线保留在 App 内。
 
 敏感操作识别依赖关键词，不能保证覆盖所有风险动作。界面显示完成也需结合实际手机状态。OpenAI 请求失败、空文本或输出不完整会中止任务并记录失败；模型输出格式解析失败先等待后重试。豆包适配器仍有 API 错误误记 COMPLETE 的已知问题。
+
+## 执行进度浮窗
+
+浮窗由已连接的无障碍服务管理，使用 Android 的 [TYPE_ACCESSIBILITY_OVERLAY](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_ACCESSIBILITY_OVERLAY)，不需要额外申请“显示在其他应用上层”权限。浮窗不抢输入焦点，窗口以外的区域照常操作；无障碍服务销毁时会清理窗口和状态订阅。
+
+Python Runner 的事件通过可选阶段回调送入 `TaskController` 的 StateFlow，App 和浮窗共用状态。步数上限是执行预算，不能当成已完成百分比，因此显示“第 N 步”和“最多 N 步”。进度回调异常不会改变执行结果。
+
+[Android 截图 API 文档](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#takeScreenshot(int,java.util.concurrent.Executor,android.accessibilityservice.AccessibilityService.TakeScreenshotCallback))说明，显示屏截图可能包含无障碍浮层。当前实现会在截图及点击/滑动前暂时隐藏浮窗，等待渲染帧后再执行，结束或异常后恢复显示；截图尺寸和坐标体系保持一致。相关状态及回调顺序有离线测试覆盖，浮窗显示、拖动和屏幕合成效果仍需安装 APK 后在设备上回归。
 
 ## helper 应用索引
 

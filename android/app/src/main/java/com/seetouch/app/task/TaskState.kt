@@ -38,7 +38,17 @@ data class StepInfo(
 }
 
 /** 敏感动作待确认信息。 */
-data class PendingConfirmation(val message: String)
+data class PendingConfirmation(val message: String) {
+    companion object {
+        fun fromRunnerMessage(message: String): PendingConfirmation = PendingConfirmation(
+            message.lineSequence().filterNot {
+                val line = it.trim()
+                line.startsWith("====") || line.startsWith("截图路径:") ||
+                    line == "继续执行?[y/N]:"
+            }.joinToString("\n").trim(),
+        )
+    }
+}
 
 /** UI 可观察的整体任务状态。 */
 data class TaskUiState(
@@ -48,4 +58,6 @@ data class TaskUiState(
     val pendingConfirmation: PendingConfirmation? = null,
     val resultSummary: String? = null,
     val errorDetail: String? = null,
+    val maxSteps: Int = 45,
+    val progress: TaskProgress = TaskProgress(),
 )

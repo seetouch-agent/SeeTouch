@@ -34,6 +34,7 @@ def run_task(
     config_json: str,
     step_callback=None,
     confirm_callback=None,
+    progress_callback=None,
 ) -> str:
     """执行一次自然语言任务,返回 JSON 结果摘要。
 
@@ -45,10 +46,13 @@ def run_task(
         step_callback:    每步结束回调 callback(step_json: str),供 Kotlin 侧展示进度
         confirm_callback: 敏感动作确认回调 callback(message: str) -> bool;
                           None 时默认拒绝(安全兜底)
+        progress_callback: 可选阶段回调 callback(progress_json: str)，不包含截图或凭据
     """
     _ensure_logging()
     try:
-        return _run_task(instruction, json.loads(config_json), step_callback, confirm_callback)
+        return _run_task(
+            instruction, json.loads(config_json), step_callback, confirm_callback, progress_callback,
+        )
     except Exception:
         return json.dumps(
             {"status": "error", "detail": traceback.format_exc()},
@@ -79,7 +83,39 @@ def _create_reasoner(config: dict):
     raise ValueError(f"Unsupported Android reasoner: {name}")
 
 
-def _run_task(instruction, config: dict, step_callback, confirm_callback) -> str:
+def _notify_progress(callback, phase: str, step: int, action=None, action_summary="") -> None:
+    if callback is None:
+        return
+    try:
+        _call(callback, json.dumps({
+            "phase": phase, "step": step,
+            "action": action.type if action is not None else "",
+            "action_summary": action_summary,
+        }, ensure_ascii=False))
+    except Exception:
+        # Display failures must not change the task's actions or completion semantics.
+        logger.warning("progress callback failed", exc_info=True)
+
+
+def _progress_bus(callback):
+    from seetouch.core.event_bus import (
+        EventBus, STEP_EXECUTING, STEP_REASONING_DONE, STEP_REASONING_STARTED,
+    )
+
+    bus = EventBus()
+    bus.subscribe(STEP_REASONING_STARTED, lambda step, **_: _notify_progress(
+        callback, "thinking", step,
+    ))
+    bus.subscribe(STEP_REASONING_DONE, lambda step, action, action_summary="", **_: _notify_progress(
+        callback, "checking", step, action, action_summary,
+    ))
+    bus.subscribe(STEP_EXECUTING, lambda step, action, **_: _notify_progress(
+        callback, "executing", step, action,
+    ))
+    return bus
+
+
+def _run_task(instruction, config: dict, step_callback, confirm_callback, progress_callback=None) -> str:
     from com.seetouch.app.bridge import DeviceBridge  # type: ignore[import-not-found]
 
     from seetouch.core.runner import Runner
@@ -99,6 +135,7 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback) -> str
         return bool(_call(confirm_callback, message))
 
     device = NativeAndroidController()
+    _notify_progress(progress_callback, "starting", 0)
     # 先回桌面:agent 跟手机同机运行,不先退到后台的话
     # 首张截图会是 SeeTouch 自己的界面,模型会误判为"应用正在处理"而反复 WAIT
     device.go_home()
@@ -108,14 +145,18 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback) -> str
         reasoner=reasoner,
         guard=Guard(prompt_fn=prompt),
         runs_dir=runs_dir,
+        event_bus=_progress_bus(progress_callback) if progress_callback is not None else None,
     )
 
     task = Task(instruction=instruction, max_steps=max_steps)
     runner.start(task)
+    next_step = 1
     while not runner.is_finished:
+        _notify_progress(progress_callback, "capturing", next_step)
         result = runner.step()
         if step_callback is not None:
             _call(step_callback, json.dumps(_step_summary(result), ensure_ascii=False))
+        next_step += 1
 
     summary = runner.session.summarize()
     return json.dumps(

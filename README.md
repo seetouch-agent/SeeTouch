@@ -10,11 +10,11 @@ SeeTouch 通过屏幕截图和视觉语言模型（VLM）理解手机界面，�
 |---|---|---|---|
 | PC 命令行 `run` | ADB + uiautomator2 | 默认 Gemini；可选 `--reasoner doubao` 或 `--reasoner openai` | 命中关键词规则后在终端确认 |
 | PC Web 调试器 `debug` | ADB + uiautomator2 | 默认 Doubao，可用 `--reasoner` 选择 Gemini / OpenAI | **当前自动批准，尚未接入交互确认** |
-| Android 独立 App | 无障碍服务 + Kotlin/Python 桥接 | 新安装默认 OpenAI 兼容接口，支持 Chat Completions / Responses；保留旧豆包配置 | App 内确认，5 分钟超时拒绝 |
+| Android 独立 App | 无障碍服务 + Kotlin/Python 桥接 | 新安装默认 OpenAI 兼容接口，支持 Chat Completions / Responses；保留旧豆包配置 | App 或浮窗确认，5 分钟超时拒绝 |
 
-Android App 不依赖电脑执行任务，但仍需联网调用云端模型。构建与安装见 [Android 指南](android/README.md)。
+Android App 不依赖电脑执行任务，但仍需联网调用云端模型。执行时使用可拖动、可收起的浮窗显示当前步骤、思考/执行阶段和操作摘要；敏感动作可在浮窗确认。构建与安装见 [Android 指南](android/README.md)。
 
-本说明对应 2026-10-19 的工作树，包含 Android OpenAI 兼容接口扩展；运行验证范围见文末。
+本说明对应 2026-10-19 的工作树，包含 Android OpenAI 兼容接口扩展和执行进度浮窗；运行验证范围见文末。
 
 ## PC 快速开始
 
@@ -225,9 +225,9 @@ python -m pytest tests -q
 python -m ruff check seetouch
 ```
 
-2026-10-19：在 Android 固定的 `openai==1.30.0` / `pydantic==1.10.22` / `httpx==0.27.2` 及 PC 最低 SDK `openai==1.66.0` 两套环境中，`tests/` 各 **148 passed**；`ruff check seetouch`、本次修改的 Python 测试/入口检查和 `git diff --check` 通过。测试覆盖真实 SDK 的 mock HTTP 请求，不调用真实模型服务或操作手机。
+2026-10-19：在 Android 固定的 `openai==1.30.0` / `pydantic==1.10.22` / `httpx==0.27.2` 及 PC 最低 SDK `openai==1.66.0` 两套环境中，`tests/` 各 **154 passed**；`ruff check seetouch`、本次修改的 Python 测试/入口检查和 `git diff --check` 通过。测试覆盖真实 SDK 的 mock HTTP 请求，不调用真实模型服务或操作手机。
 
-Android 英文路径构建副本与工作树源码哈希一致：`testDebugUnitTest` **8 passed**，`assembleDebug` 成功。APK 为 **1.1（versionCode 2）**，包含 arm64-v8a / x86_64，约 68.9 MB；已核对 Python 模块打包及 APK 签名。`lintDebug` 通过，0 errors / 26 warnings（版本更新和代码风格建议）。
+Android 英文路径构建副本与工作树源码哈希一致：`testDebugUnitTest` **16 passed**，`assembleDebug` 成功。APK 为 **1.2（versionCode 3）**，包含 arm64-v8a / x86_64，约 69.0 MB；已核对 Python 模块打包及 APK 签名。`lintDebug` 通过，0 errors / 28 warnings（版本、风格和国际化建议）。
 
 用户真机验证：CLI 通过 DeepSeek 的 OpenAI 兼容 Chat Completions 接口，在小米 Android 16 手机上执行“打开小红书”，最大步数设置为 3，人工确认应用成功打开。此记录未注明具体模型 ID 和实际执行步数；Responses 尚无真实服务成功验证记录。此 CLI 历史验证不能作为独立 App 回归结果。
 

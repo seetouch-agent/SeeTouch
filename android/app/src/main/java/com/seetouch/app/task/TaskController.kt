@@ -40,12 +40,15 @@ object TaskController {
         }
         _state.value = TaskUiState(status = TaskStatus.RUNNING, instruction = instruction)
         try {
+            val maxSteps = JSONObject(taskConfigJson).optInt("max_steps", 45).coerceIn(1, 200)
+            _state.update { it.copy(maxSteps = maxSteps) }
             val result = Python.getInstance()
                 .getModule("seetouchapp.task_entry")
                 .callAttr(
                     "run_task", instruction, taskConfigJson,
                     { stepJson: String -> onStep(stepJson); Unit },
                     { message: String -> awaitConfirmation(message) },
+                    { progressJson: String -> onProgress(progressJson); Unit },
                 )
                 .toString()
             onFinished(result)
@@ -55,12 +58,14 @@ object TaskController {
         } finally {
             confirmFuture?.complete(false)
             confirmFuture = null
+            _state.update { it.copy(pendingConfirmation = null) }
             running.set(false)
         }
     }
 
     /** UI 对敏感动作确认弹窗的回应。 */
     fun respondToConfirmation(approved: Boolean) {
+        if (_state.value.pendingConfirmation == null) return
         _state.update { it.copy(pendingConfirmation = null) }
         confirmFuture?.complete(approved)
     }
@@ -75,14 +80,29 @@ object TaskController {
     private fun onStep(stepJson: String) {
         Log.i(TAG, "step: $stepJson")
         val info = StepInfo.fromJson(stepJson)
-        _state.update { it.copy(steps = it.steps + info) }
+        _state.update { it.copy(steps = it.steps + info,
+            progress = TaskProgress(info.step, TaskPhase.BETWEEN_STEPS,
+                info.action, info.actionSummary)) }
+    }
+
+    private fun onProgress(progressJson: String) {
+        runCatching { TaskProgress.fromJson(progressJson) }
+            .onSuccess { progress ->
+                _state.update { state ->
+                    if (state.status != TaskStatus.RUNNING) state
+                    else state.copy(progress = if (progress.step == state.progress.step &&
+                        progress.phase == TaskPhase.EXECUTING)
+                        progress.copy(actionSummary = state.progress.actionSummary) else progress)
+                }
+            }
+            .onFailure { Log.w(TAG, "invalid progress callback", it) }
     }
 
     /** Python Runner 线程阻塞等待 UI 确认;超时视为拒绝。 */
     private fun awaitConfirmation(message: String): Boolean {
         val future = CompletableFuture<Boolean>()
         confirmFuture = future
-        _state.update { it.copy(pendingConfirmation = PendingConfirmation(message)) }
+        _state.update { it.copy(pendingConfirmation = PendingConfirmation.fromRunnerMessage(message)) }
         return try {
             future.get(CONFIRM_TIMEOUT_MIN, TimeUnit.MINUTES)
         } catch (t: Throwable) {

@@ -4,11 +4,22 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Path
+import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import com.seetouch.app.overlay.TaskProgressOverlay
+import com.seetouch.app.task.TaskController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
@@ -20,6 +31,9 @@ import java.util.concurrent.TimeUnit
  * 回调本身跑在主线程,内部用 CountDownLatch 桥接。
  */
 class SeeTouchAccessibilityService : AccessibilityService() {
+    private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var overlayJob: Job? = null
+    @Volatile private var progressOverlay: TaskProgressOverlay? = null
 
     @Volatile
     private var foregroundPackage: String? = null
@@ -27,16 +41,26 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        overlayJob?.cancel()
+        progressOverlay?.close()
+        val overlay = TaskProgressOverlay(this)
+        progressOverlay = overlay
+        overlayJob = overlayScope.launch { TaskController.state.collect { overlay.render(it) } }
         Log.i(TAG, "accessibility service connected")
     }
 
     override fun onDestroy() {
+        overlayScope.cancel()
+        progressOverlay?.close()
+        progressOverlay = null
         if (instance === this) instance = null
         super.onDestroy()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        if (windows.any { it.id == event.windowId &&
+                it.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }) return
         val pkg = event.packageName?.toString() ?: return
         // 输入法窗口不代表前台 app 切换
         if (pkg.contains("inputmethod") || pkg.contains(".ime")) return
@@ -44,6 +68,11 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        progressOverlay?.onConfigurationChanged()
+    }
 
     // ------------------------- 查询 -------------------------
 
@@ -53,7 +82,9 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     // ------------------------- 截图 -------------------------
 
     /** 截取默认显示屏,返回软件位图;失败返回 null。 */
-    fun takeScreenshotBitmap(): Bitmap? {
+    fun takeScreenshotBitmap(): Bitmap? = withoutProgressOverlay { takeUnobstructedScreenshot() }
+
+    private fun takeUnobstructedScreenshot(): Bitmap? {
         val latch = CountDownLatch(1)
         var bitmap: Bitmap? = null
         val mainExecutor: Executor = mainExecutor
@@ -107,7 +138,10 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun dispatchGestureBlocking(gesture: GestureDescription): Boolean {
+    private fun dispatchGestureBlocking(gesture: GestureDescription): Boolean =
+        withoutProgressOverlay { dispatchUnobstructedGesture(gesture) }
+
+    private fun dispatchUnobstructedGesture(gesture: GestureDescription): Boolean {
         val latch = CountDownLatch(1)
         var ok = false
         val dispatched = dispatchGesture(
@@ -158,6 +192,11 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
 
     fun pressHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
+
+    private fun <T> withoutProgressOverlay(operation: () -> T): T {
+        val overlay = progressOverlay
+        return if (overlay == null) operation() else overlay.withoutOverlay(operation)
+    }
 
     companion object {
         private const val TAG = "SeeTouchA11y"
