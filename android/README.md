@@ -22,6 +22,8 @@ PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic
 
 ## 编译与安装
 
+当前尚未发布 GitHub Release 或 APK 下载资产，以下为从源码构建与安装的方法。
+
 使用 Android Studio 或配置好的 JDK/Android SDK，安装匹配的 SDK Platform（36.1）。`android/local.properties` 中的 `sdk.dir` 是本机配置，不提交。Java 源兼容性 11 不等于 Gradle 运行时 JDK 要求；可使用 Android Studio 配套 JDK，并以实际 Gradle 诊断为准。
 
 Windows PowerShell（仓库根目录）：
@@ -34,7 +36,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下载依赖。APK 大小随构建配置变化。若 Windows 中文路径下的 JVM 测试报告 ClassNotFoundException，可将相同源码复制到英文路径后运行 `testDebugUnitTest assembleDebug lintDebug`，并核对源码哈希。
 
-2026-10-19 验证：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **37 passed**，`assembleDebug` 成功。1.4 / versionCode 5 的 Debug APK 为 69,616,864 字节，包含两个 ABI；结果处理等 Python 模块已打包，APK v2 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **201 passed**；`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。未调用真实模型服务或进行真机回归。
+代码基线 `ec78e8d` 随附的 2026-10-19 验证记录（本次文档同步未重跑）：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **37 passed**，`assembleDebug` 成功。1.4 / versionCode 5 的 Debug APK 为 69,616,864 字节，包含两个 ABI；结果处理等 Python 模块已打包，APK v2 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **201 passed**；`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。未调用真实模型服务或进行真机回归。
 
 测试只补关键回归；本机依赖已备齐时，连续运行两套 Python 全量测试与强制重跑的 Android JVM suite，共 **183.91 秒（约 3 分 4 秒）**，低于 5 分钟预算。其中两轮 Python 各约 28 秒，Gradle 含依赖任务重跑约 127 秒；首次下载依赖的准备时间不作为 suite 耗时承诺。复现命令为对应 SDK 环境中的 `python -m pytest tests -q`，以及英文路径 Android 工程中的 `gradlew.bat --offline --no-daemon testDebugUnitTest --rerun-tasks`；APK 与 Lint 另用 `assembleDebug lintDebug` 验证。
 
@@ -83,7 +85,7 @@ END <payload 字节数>
 
 ## OPEN 与源码入口
 
-OPEN 使用显示名索引：学习缓存 → 归一化精确匹配 → 唯一子串匹配 → 候选反馈 → 视觉兜底。索引来自 `DeviceBridge.launchableApps()`；内部包名直通仍保留，旧 L1.5 方案已被替换。
+OPEN 按应用显示名查找并启动应用；无法匹配时反馈候选或通过屏幕查找。索引来自 `DeviceBridge.launchableApps()`，实现细节见 [技术决策](../memory/technical_decisions.md)。旧静态表及 L1.5 方案已被替换。
 
 - `app/src/main/java/com/seetouch/app/device/`：无障碍服务。
 - `bridge/DeviceBridge.kt`：Python/Kotlin 接口（相对于上述 app Kotlin 包）。

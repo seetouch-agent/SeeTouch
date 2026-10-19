@@ -1,6 +1,6 @@
 # Gemini 集成指南
 
-核对日期：2026-10-12；代码基线：`de755f7`。本文描述当前实现，不承诺模型价格、配额或在线可用性。
+核对日期：2026-10-19；代码基线：`ec78e8d`。本文描述当前实现，不承诺模型价格、配额或在线可用性。
 
 ## 支持范围
 
@@ -76,4 +76,4 @@ print(result.action)
 python -m pytest tests/test_gemini_reasoner.py -q
 ```
 
-该文件目前包含 5 项配置测试，未覆盖真实 API 请求、API 错误路径或手机闭环。仓库中不存在 `tests/test_gemini_integration.py`。完整 `tests/` 在本次核对中为 88 passed；本轮未调用真实 Gemini 服务。
+该文件目前包含 5 项配置测试，未覆盖真实 API 请求、API 错误路径或手机闭环。仓库中不存在 `tests/test_gemini_integration.py`。代码基线随附的完整 `tests/` 记录为两套 SDK 环境各 201 passed，见 [README](../README.md#开发与验证)。本次文档同步未重跑 suite 或调用真实 Gemini 服务；整体测试数量不表示 Gemini 真实请求或真机闭环已验证。

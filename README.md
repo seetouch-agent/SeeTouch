@@ -16,6 +16,16 @@ Android App 不依赖电脑执行任务，但仍需联网调用云端模型。�
 
 本说明对应 2026-10-19 的工作树，包含 Android OpenAI 兼容接口、连接测试、执行控制及追问/人工接管；运行验证范围见文末。
 
+## 文档导航
+
+- [Android 构建与使用](android/README.md)：安装、模型设置、浮窗及任务结果。
+- [Android 交互说明](docs/android-interactions.md)：连接测试、暂停/继续、追问、接管、确认与回放。
+- [OpenAI 兼容接口指南](docs/openai-compatible.md) / [Gemini 指南](docs/gemini-integration.md)：后端配置与验证范围。
+- [产品概览](memory/product_overview.md) / [技术决策](memory/technical_decisions.md) / [路线图](memory/future_roadmap.md)：当前能力、实现细节与待办。
+- [开发历程](memory/development_history.md)：保留旧版本演化，已替换的方案不作为当前功能说明。
+
+当前尚未发布 GitHub Release 或 APK 下载资产；Android 使用者需按构建指南生成并安装 APK。
+
 ## PC 快速开始
 
 需要 Python 3.10+、Android Platform Tools（`adb`），以及已开启 USB 调试并授权电脑的 Android 设备。先用 `adb devices` 确认连接状态。
@@ -121,7 +131,7 @@ python -m seetouch run "打开设置" --reasoner openai --max-steps 3
    `python scripts/replay.py runs/<task_id>`。输出解析失败会降级 WAIT；API 错误、空文本或
    输出截断会终止任务，结果为 `completed=False`，而不会误报完成。
 
-`trace.jsonl` 保存动作、摘要、执行结果、提示词和用量等信息，当前不保存完整模型原始输出或推理内容；离线回放不能恢复这些字段。
+`trace.jsonl` 保存动作、摘要、执行结果、提示词、用量和交互等信息，普通步骤不保存完整模型原始输出或推理内容，离线回放不能恢复这些字段。启用任务控制时，暂停期间收到的旧预测可能连同原始输出保存在 `interactions.jsonl`；分享记录前同样需要检查。
 
 已有进程环境变量优先于 `.env`；修改 `.env` 后重新启动命令。截图和任务会发送到配置的服务商。
 分享日志和运行产物前请去除密钥及屏幕中的私人信息。Web 调试器用 `python -m seetouch debug --reasoner openai` 选择此后端。
@@ -206,10 +216,13 @@ tests/              # 当前维护的 Python 测试入口
 | `COMPLETE` | `{}` | 模型声明结束；不是独立验证的成功指标 |
 | `ASK_USER` | `{"question":"问题", "options":["甲","乙"]}` | 安卓端暂停并等待回答 |
 | `TAKE_OVER` | `{"reason":"请完成登录"}` | 安卓端等待人工操作，继续后重观察 |
+| `ANSWER` | `{"answer":"查询结果", "source_step":1}` | 返回答案并结束；可关联本次保存的步骤截图 |
+
+`COMPLETE` 也可携带 `answer` / `source_step`；`COMPLETE` 和 `ANSWER` 均支持 `status="failed"` 与 `reason` 表达失败。截图关联不等于答案经过事实核验。CLI/Web 尚无追问和接管交互入口，遇到这两类动作会以 `interaction_unavailable` 中止；答案写入结果摘要，Android 提供结果卡片展示。
 
 坐标采用 0–1000 归一化；设备层按实际屏幕尺寸换算。Runner 将截图宽度降至最多 720 像素，保持比例，供模型和本地记录使用。
 
-OPEN 顺序为学习缓存、本机索引归一化精确匹配、唯一子串匹配、候选反馈；索引缺失或累计多次未命中后回桌面视觉查找。内部调用保留已安装包名直通，模型提示要求输出显示名。旧静态映射表已退出启动路径。
+OPEN 按应用显示名查找并启动应用；无法匹配时反馈候选或通过屏幕查找。实现细节见 [技术决策](memory/technical_decisions.md)。
 
 ## 已知限制与数据处理
 
@@ -227,16 +240,16 @@ python -m pytest tests -q
 python -m ruff check seetouch
 ```
 
-2026-10-19：在 Android 固定的 `openai==1.30.0` / `pydantic==1.10.22` / `httpx==0.27.2` 及 PC 最低 SDK `openai==1.66.0` 两套环境中，`tests/` 各 **201 passed**；`ruff check seetouch`、本次修改的 Python 测试/入口检查和 `git diff --check` 通过。测试覆盖真实 SDK 的 mock HTTP 请求，不调用真实模型服务或操作手机。本次仅新增确认、结果、通知隐私等关键回归，重复映射和简单展示不单独写测试；完整 suite 以 5 分钟内为预算，实测见 Android 指南。
+代码基线 `ec78e8d` 随附的 2026-10-19 验证记录：在 Android 固定的 `openai==1.30.0` / `pydantic==1.10.22` / `httpx==0.27.2` 及 PC 最低 SDK `openai==1.66.0` 两套环境中，`tests/` 各 **201 passed**；`ruff check seetouch`、该代码批次的 Python 测试/入口检查和 `git diff --check` 通过。测试覆盖真实 SDK 的 mock HTTP 请求，不调用真实模型服务或操作手机。该代码批次仅新增确认、结果、通知隐私等关键回归，重复映射和简单展示不单独写测试；完整 suite 以 5 分钟内为预算，实测见 Android 指南。
 
 Android 英文路径构建副本与工作树源码哈希一致：`testDebugUnitTest` **37 passed**，`assembleDebug` 成功。APK 为 **1.4（versionCode 5）**，包含 arm64-v8a / x86_64，约 69.6 MB；已核对 Python 模块打包及 APK 签名。`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。
 
 用户真机验证：CLI 通过 DeepSeek 的 OpenAI 兼容 Chat Completions 接口，在小米 Android 16 手机上执行“打开小红书”，最大步数设置为 3，人工确认应用成功打开。此记录未注明具体模型 ID 和实际执行步数；Responses 尚无真实服务成功验证记录。此 CLI 历史验证不能作为独立 App 回归结果。
 
-早期记录包含 Doubao + PC 路径的真机试跑，以及 Android 模拟器闭环；本轮已构建 APK，未连接手机或调用真实模型服务。历史结果见 [开发历程](memory/development_history.md)，不能作为当前 Gemini 或 Android 真机回归结论。
+早期记录包含 Doubao + PC 路径的真机试跑，以及 Android 模拟器闭环；上述代码批次已构建 APK，未连接手机或调用真实模型服务。本次文档同步仅核对源码、文档和链接，未重跑模型、真机、测试 suite 或 APK 构建。历史结果见 [开发历程](memory/development_history.md)，不能作为当前 Gemini 或 Android 真机回归结论。
 
 贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)，近期工作见 [路线图](memory/future_roadmap.md)。问题反馈：[GitHub Issues](https://github.com/seetouch-agent/SeeTouch/issues)。
 
 ## 许可声明
 
-`pyproject.toml` 声明 Apache-2.0，但当前工作树中缺少 `LICENSE` 正文。应由维护者确认并补齐正式许可证文件；本次文档审计不改变许可选择。
+项目采用 [Apache-2.0](LICENSE)，与 `pyproject.toml` 的声明一致。第三方依赖、模型与服务遵循各自的许可证及服务条款。

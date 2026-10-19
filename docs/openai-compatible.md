@@ -1,5 +1,7 @@
 # OpenAI 兼容 API 配置指南
 
+核对日期：2026-10-19；代码基线：`ec78e8d`。
+
 CLI、Web 调试器和 Android App 共用 `OpenAIReasoner`。CLI 默认 Gemini，调试器默认 Doubao；Android 新安装默认使用 OpenAI 兼容接口，已有豆包配置保留原后端。
 
 ## PC 配置
@@ -42,5 +44,7 @@ Responses 输出按 [OpenAI 官方文档](https://developers.openai.com/api/docs
 ## 失败与验证边界
 
 OpenAI 后端的 API 异常、空文本和截断输出会让 Runner 中止并记录 `completed=False`；输出格式解析失败会等待后重试。模型声明 COMPLETE 仍不代表经过独立验证的任务成功。
+
+已有 CLI 经 OpenAI 兼容 Chat Completions 在真机打开应用的用户确认记录；当前独立 App 真机回归与 Responses 真实服务验证尚未完成。mock HTTP 测试范围见 [README](../README.md#开发与验证)，本次文档同步未新增在线验证。
 
 截图、任务和历史摘要会发送到所选服务。调试器原有的访问控制及自动批准敏感操作限制仍存在，见主 README。

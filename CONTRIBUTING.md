@@ -37,7 +37,7 @@
 
 4. 审阅 diff 后提交，推送到自己的分支并创建 PR。提交信息保持简洁，例如 `docs: 更新 Android 构建说明`。
 
-2026-10-12 基线验证：88 项 Python 测试通过，`ruff check seetouch` 通过；包含 tests/scripts 的更广 lint 检查仍有 4 项既存问题。新增代码应有针对性验证，不用文档改动掩盖已有失败。
+当前代码基线 `ec78e8d` 随附 2026-10-19 验证记录：两套 SDK 环境各 201 项 Python 测试、37 项 Android JVM 测试、APK 构建及 lint 通过。详见 [README 验证范围](README.md#开发与验证) 与 [Android 指南](android/README.md)。这些是已记录的验证，不表示每次文档修改均重跑全部检查；新增代码应有针对性验证。10月12日扩展 lint 的4项问题属于旧快照，复用前重新检查。
 
 ## 接口与分层
 
@@ -67,11 +67,11 @@ class CustomReasoner:
 
 先说明问题和改动后的行为，再列出实际执行的验证。涉及真机时写清入口、设备型号、任务、步数和人工观察结果。日志摘要文件是 `runs/<task_id>/summary.json`，不是 `report.json`。
 
-不要在普通单元测试里调用真实 API 或操作已连接手机。API 错误误记完成、调试器自动批准、Android 凭据存储等现有缺口见 [路线图](memory/future_roadmap.md)。
+不要在普通单元测试里调用真实 API 或操作已连接手机。Gemini API 错误误记完成、调试器自动批准、Android 凭据存储等现有缺口见 [路线图](memory/future_roadmap.md)。
 
 ## 文档、隐私与许可证
 
 - 用户流程改动同步 README 和对应指南；架构决策同步 `memory/technical_decisions.md`；历史记录注明当时版本与验证范围。
 - 公开文档使用相对路径或 `<repo>` 等占位符，保留作者署名但避免个人邮箱和电脑路径。
 - Git 提交邮箱可在 GitHub Settings → Emails 中选择平台提供的 noreply 地址；修改本地配置只影响新提交，旧提交原始元数据不会自动变化。
-- 项目元数据声明 Apache-2.0；当前缺少 `LICENSE` 正文，需维护者确认补齐。不要链接不存在的许可证文件。
+- 项目采用 [Apache-2.0](LICENSE)，与 pyproject.toml 的许可证声明一致。新增第三方代码、模型或素材时保留来源和相应许可证。

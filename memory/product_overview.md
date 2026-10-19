@@ -7,7 +7,7 @@ metadata:
 
 # SeeTouch 产品概览
 
-更新时间：2026-10-12；代码基线：`de755f7`。
+更新时间：2026-10-19；代码基线：`ec78e8d`。
 
 ## 定位
 
@@ -17,9 +17,9 @@ metadata:
 
 | 入口 | 设备层 | 模型 | 确认方式 |
 |---|---|---|---|
-| CLI run | uiautomator2 | 默认 Gemini，可选 Doubao | 终端确认 |
-| Web debug | uiautomator2 | 固定 Doubao | 当前自动批准，待补确认交互 |
-| Android App | Accessibility + DeviceBridge | 固定 Doubao | Compose 确认，5 分钟超时拒绝 |
+| CLI run | uiautomator2 | 默认 Gemini，可选 Doubao / OpenAI | 终端确认 |
+| Web debug | uiautomator2 | 默认 Doubao，可选 Gemini / OpenAI | 当前自动批准，待补确认交互 |
+| Android App | Accessibility + DeviceBridge | 新安装默认 OpenAI 兼容接口，保留旧豆包配置 | App / 浮窗 / 通知确认；默认 60 秒，设置可调 10–600 秒 |
 
 Android 采用 Kotlin/Compose + Chaquopy 17.0.0 / Python 3.12，minSdk 30。构建用 Sync 任务复制根目录 Python 包，不维护第二份 Python 核心。
 
@@ -27,21 +27,25 @@ Android 采用 Kotlin/Compose + Chaquopy 17.0.0 / Python 3.12，minSdk 30。构�
 
 - `Runner.start/step/run`：截图、预测、Guard、动作执行和 Session 记录；EventBus 用于调试器进度与日志。
 - `DeviceController` 与 `Reasoner` Protocol：设备层和模型层解耦。
-- 7 类动作：CLICK、TYPE、SCROLL、OPEN、BACK、WAIT、COMPLETE。坐标 0–1000；截图宽度最多 720，保持比例。
+- 10 类动作：CLICK、TYPE、SCROLL、OPEN、BACK、WAIT、COMPLETE、ASK_USER、TAKE_OVER、ANSWER。坐标 0–1000；截图宽度最多 720，保持比例。
 - OPEN 使用设备显示名索引、候选反馈和视觉兜底；静态包名表已退出路径。
-- 默认连续 2 次执行失败、3 次完全相同动作或达到步数上限时中止。成功动作后默认等待 1 秒，WAIT/COMPLETE 除外。
-- 记录截图、trace 和 summary；CLI/调试器保存在 runs，Android 保存在应用内部文件目录。
+- 默认连续 2 次执行失败、3 次完全相同动作或达到步数上限时中止。成功设备动作后默认等待 1 秒，WAIT 不额外等待；终止与交互动作走各自处理分支。
+- 记录截图、trace、交互事件和 summary；CLI/调试器保存在 runs，Android 保存在应用内部文件目录。
+- Android 支持连接测试、悬浮球从当前应用发起任务、进度浮窗、暂停/继续/终止、模型追问、人工接管、敏感确认卡片、结果与答案截图来源、本地评价及可选系统语音输入/播报。
+- CLI/Web 尚无追问或接管交互入口；相关模型动作会以 interaction_unavailable 中止。完整行为见 [Android 交互说明](../docs/android-interactions.md)。
 
 ## 必须保留的限制说明
 
 Guard 是关键词启发式，不保证覆盖全部敏感动作。调试器无登录验证、监听所有网卡并自动批准确认，不能当成安全的远程执行服务。
 
-两个 Reasoner 捕获 API 异常后返回 COMPLETE，Runner 会误记 completed；模型的完成声明也没有独立结果验证。任何成功率或完成结论均需额外检查任务结果。
+Gemini 捕获 API 异常后仍返回 COMPLETE，可能误记 completed；OpenAI 和 Doubao 已抛出 VLMAPIError，由 Runner 中止并记录失败。模型的完成声明也没有独立结果验证。任何成功率或完成结论均需额外检查任务结果。
 
 云端请求包含截图、任务和历史摘要，本地数据没有自动脱敏。Android key 存储、备份和 exported 诊断入口待加固。
 
 ## 当前验证
 
-2026-10-12：`python -m pytest tests -q` 为 88 passed；`python -m ruff check seetouch` 通过。扩展到 tests/scripts 的 lint 仍有 4 项既存问题。未重跑真机、真实 API 或 APK 构建。
+代码基线随附的 2026-10-19 验证记录：两套 SDK 环境各 201 项 Python 测试通过；Android JVM 37 项通过，APK 1.4 / versionCode 5 构建及 lint 通过。它们是既有记录，本次文档同步未重跑 suite、构建、真实模型或真机任务；详细范围见 [主 README](../README.md) 和 [Android 指南](../android/README.md)。
 
-早期 PC 真机与 Android 模拟器结果只是历史试跑，见 [开发历程](development_history.md)。未合并远程分支的通用 OpenAI 接口不能算作当前 main 已有能力。
+CLI 已有用户确认的 OpenAI 兼容 Chat Completions 真机打开应用记录；不能代替当前独立 App 回归。Responses 尚无真实服务成功验证，本轮 Android 真机验证未完成。早期试跑见 [开发历程](development_history.md)。
+
+当前没有 GitHub Release / APK 下载资产，需按 Android 指南自行构建。项目使用 [Apache-2.0](../LICENSE)。

@@ -1,6 +1,6 @@
 # Gemini 集成状态
 
-更新时间：2026-10-16（入口选择已更新，历史验证保留原日期）。使用方式见 [集成指南](gemini-integration.md)。
+更新时间：2026-10-19；代码基线：`ec78e8d`（历史验证保留原日期）。使用方式见 [集成指南](gemini-integration.md)。
 
 ## 已实现
 
@@ -20,8 +20,10 @@
 
 ## 验证记录
 
-2026-10-12：`python -m pytest tests -q` 为 **88 passed**，`python -m ruff check seetouch` 通过。包括 tests/scripts 的扩展 lint 检查还有 4 项既存问题。本轮没有在线模型或真机验证。
+历史基线（2026-10-12）：`tests/` 为 **88 passed**，`ruff check seetouch` 通过；扩展 lint 的4项问题仅代表当时快照。
 
-旧版本记录的“82 passed, 6 failed”已经不能描述当前 main；其相关异常属性和 ParseError 回归已在 `8f1b51b` / `2e312f8` 中修复。当前配置测试通过也不能证明错误路径和真实 API 全面可用。
+当前代码基线随附的 2026-10-19 验证记录为两套 SDK 环境各 **201 passed**；完整范围见 [README](../README.md#开发与验证)。本次文档同步未重跑测试，也没有在线模型或真机验证。
+
+旧版本记录的“82 passed, 6 failed”属于旧版本结果，不能描述当前 main；其相关异常属性和 ParseError 回归已在 `8f1b51b` / `2e312f8` 中修复。当前配置测试通过也不能证明错误路径和真实 API 全面可用。
 
 免费额度和价格不再维护静态对比表，以服务商和实际 API 项目为准。

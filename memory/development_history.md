@@ -9,7 +9,9 @@ metadata:
 
 > 历史记录不是当前能力清单。当前入口差异、已知缺陷及验证状态以 [产品概览](product_overview.md) 和 [技术决策](technical_decisions.md) 为准。历史耗时/成功记录未在本轮重跑，不能作为当前模型或真机性能结论。
 
-更新时间：2026-10-12（历史里程碑保留当时语境）
+历史记录整理：2026-10-19；以下旧里程碑保留当时语境。
+
+> 替换关系：旧“包名 + 静态表/alias + 多级兜底”已于 2026-07-05 被显示名与本机应用索引方案替换；旧 L1/L1.5 等层级仅作历史记录。10月12日后的 OpenAI 双协议、Android 追问/接管、结果与通知能力已进入当前 main，见 [产品概览](product_overview.md)。
 
 ---
 
@@ -33,8 +35,8 @@ metadata:
 | 代码复用 | **从零写，不 import 比赛代码** | BaseAgent 强约束太多；参考 prompt/解析逻辑即可 |
 | 执行模式 | 自动连续 + 敏感动作前确认 | 全自动有真实风险，每步确认极慢 |
 | 坐标体系 | 0-1000 归一化（沿用比赛） | 模型已习惯；perception 层负责像素换算 |
-| OPEN 启动策略 | 静态表 + 多级 fallback | 用户接受静态表但要求兜底，不要硬编码全量 |
-| Doubao thinking | 默认 `auto`（不再强制 disabled） | 比赛规则不再约束，模型按需启动 VisualCoT |
+| OPEN 启动策略（已被替换） | 静态表 + 多级 fallback；2026-07-05 后改为应用显示名索引 | 用户接受静态表但要求兜底，不要硬编码全量 |
+| Doubao thinking（历史配置，已替换） | 当时默认 `auto`；当前默认 `enabled` | 比赛规则不再约束，模型按需启动 VisualCoT |
 
 ---
 
@@ -221,7 +223,7 @@ metadata:
   - **坑 2**: `go_home()` 返回时窗口事件未到，`current_app()` 读到旧前台 → 视觉兜底 baseline 误学 launcher 包名；`go_home()` 后加 0.6s sleep
 - **Phase 2 Compose UI + 前台 Service（commit `9a7e74a`）**: `task/TaskController`（单例 StateFlow<TaskUiState>，Python step/confirm 回调 → UI）、`task/TaskExecutionService`（前台服务 specialUse 子类型，任务线程）、`ui/MainActivity`（任务输入 + 实时步骤时间线 + 敏感动作确认弹窗(5 分钟超时默认拒绝) + 设置页）、`settings/AppSettings`（API key/模型 ID/最大步数/thinking 开关，与 PC 端 .env 可配置项对齐）。`run_task` 改为 config JSON 传参。
   - **关键发现**: agent 与手机同机运行，任务启动时首张截图是 SeeTouch 自己的界面，模型误判"应用正在处理"反复 WAIT 直到 stuck_loop 中止 → `task_entry` 在 runner 启动前先 `go_home()`
-- **Phase 3 OPEN 接入 on-device 应用索引（commit `2854f2a`）**: `AppLauncher` 新增可选 `label_resolver` 注入点（L1.5，仅精确匹配禁止模糊）；`DeviceBridge.packageForLabel` 复用 helper 的 `PackageManagerAppIndexProvider` 按显示名 trim+忽略大小写匹配。OPEN 层级变为 learned → L1 表 → L1' alias → **L1.5 label** → L2 直通 → L4 视觉兜底。
+- **Phase 3 OPEN 接入 on-device 应用索引（历史方案，已被2026-07-05重构替换；commit `2854f2a`）**: `AppLauncher` 新增可选 `label_resolver` 注入点（L1.5，仅精确匹配禁止模糊）；`DeviceBridge.packageForLabel` 复用 helper 的 `PackageManagerAppIndexProvider` 按显示名 trim+忽略大小写匹配。OPEN 层级变为 learned → L1 表 → L1' alias → **L1.5 label** → L2 直通 → L4 视觉兜底。
 - **验证**（云端 Pixel 6 模拟器 / Android 14）: UI 全流程 "Open Clock" 3 步完成（OPEN→WAIT→COMPLETE），'时钟' 经 L1.5 命中 `com.google.android.deskclock` 免视觉兜底；时间线实时渲染、完成/中止状态、设置页读写均正常。PC 端 64 单测全绿。待真机（Xiaomi Android 12）回归。
 - **helper 模式保留**: AppListExportActivity 原样可用，同一 APK 双模式。
 
@@ -304,7 +306,7 @@ metadata:
 - learned cache 永远不要在执行前写入，只能事后基于结果回写
 - 死循环检测是产品必须，不能依赖人工监控
 
-详见 [[technical_decisions.md]]
+详见 [technical_decisions.md](technical_decisions.md)
 
 ---
 
@@ -393,7 +395,7 @@ metadata:
 
 ## OPEN 重构：应用名一等公民（2026-07-05）
 
-**动机（用户拍板）：** VLM 没有包名知识只有应用名知识，旧的"输出包名+五级兜底"不好用。
+**动机（用户拍板）：** VLM 没有包名知识只有应用名知识，旧的"输出包名+五级兜底"不好用。该机制已被以下新链路替换，不再是当前 OPEN 设计。
 
 **新链路：** VLM 输出应用桌面显示名 → AppIndex（learned cache → 精确 → 唯一强模糊直接启动）
 → 歧义/未命中 raise `OpenAppNotFound(suggestions)` → Runner 把候选写 notes 反馈 VLM 重选/换关键词
@@ -426,8 +428,14 @@ metadata:
 
 ---
 
+## 当前代码快照（2026-10-19）
+
+代码基线 `ec78e8d` 已包含 OpenAI 兼容 Chat Completions / Responses、Android 连接测试、浮窗控制、追问与人工接管、确认卡片、结构化答案及结果通知。旧静态表启动机制、固定豆包和单一确认弹窗方案已被替换；当前架构见 [技术决策](technical_decisions.md)。
+
+该代码基线随附两套 SDK 环境各201项 Python 测试、37项 Android JVM 测试、APK 1.4构建及 lint 记录，完整范围见 [主 README](../README.md#开发与验证)。本次仅同步文档与许可证，未新增真机、在线模型或性能验证。
+
 ## 相关记忆
 
-- [[technical_decisions.md]] — fuzzy 匹配移除详细原因、WAIT 协议设计
-- [[product_overview.md]] — 产品定位、核心能力
-- [[future_roadmap.md]] — 下一步计划、on-device APP 迁移路径
+- [technical_decisions.md](technical_decisions.md) — fuzzy 匹配移除详细原因、WAIT 协议设计
+- [product_overview.md](product_overview.md) — 产品定位、核心能力
+- [future_roadmap.md](future_roadmap.md) — 当前待办；独立 Android App 已实现，早期迁移计划已完成
