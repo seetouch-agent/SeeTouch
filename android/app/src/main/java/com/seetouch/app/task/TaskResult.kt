@@ -51,6 +51,10 @@ data class TaskResult(
     val sourceStep: Int? = null,
     val sourceScreenshot: String? = null,
     val finishedAt: Long = System.currentTimeMillis(),
+    val usedMemoryIds: List<String> = emptyList(),
+    val learnedMemoryId: String? = null,
+    val learningStatus: String = "disabled",
+    val memorySuggestions: String = "[]",
 ) {
     val statusLabel: String get() = when (status) {
         TaskStatus.COMPLETED -> "已完成"
@@ -63,6 +67,8 @@ data class TaskResult(
         .put("total_steps", totalSteps).put("elapsed_seconds", elapsedSeconds)
         .put("input_usage", inputUsage).put("output_usage", outputUsage).put("answer", answer)
         .put("source_step", sourceStep).put("source_screenshot", sourceScreenshot).put("finished_at", finishedAt)
+        .put("used_memory_ids", org.json.JSONArray(usedMemoryIds)).put("learned_memory_id", learnedMemoryId)
+        .put("learning_status", learningStatus).put("memory_suggestions", org.json.JSONArray(memorySuggestions))
 
     companion object {
         fun fromJson(o: JSONObject): TaskResult = TaskResult(
@@ -71,7 +77,9 @@ data class TaskResult(
             o.optDouble("elapsed_seconds", 0.0).coerceAtLeast(0.0),
             o.optLong("input_usage"), o.optLong("output_usage"), o.optString("answer"),
             o.optInt("source_step").takeIf { it > 0 },
-            o.optString("source_screenshot").takeIf { it.isNotBlank() && it != "null" }, o.optLong("finished_at"))
+            o.optString("source_screenshot").takeIf { it.isNotBlank() && it != "null" }, o.optLong("finished_at"),
+            memoryIds(o), o.optString("learned_memory_id").takeIf { it.isNotBlank() && it != "null" },
+            o.optString("learning_status", "disabled"), o.optJSONArray("memory_suggestions")?.toString() ?: "[]")
 
         fun fromRunner(json: String, fallbackId: String, instruction: String, steps: Int,
             elapsed: Double, stopped: Boolean = false): TaskResult {
@@ -87,7 +95,13 @@ data class TaskResult(
                 tokens?.optLong("input") ?: o.optLong("total_input_tokens"),
                 tokens?.optLong("output") ?: o.optLong("total_output_tokens"),
                 o.optString("answer"), o.optInt("answer_source_step").takeIf { it > 0 },
-                o.optString("answer_screenshot").takeIf { it.isNotBlank() && it != "null" })
+                o.optString("answer_screenshot").takeIf { it.isNotBlank() && it != "null" },
+                usedMemoryIds = memoryIds(o), learnedMemoryId = o.optString("learned_memory_id")
+                    .takeIf { it.isNotBlank() && it != "null" }, learningStatus = o.optString("learning_status", "disabled"),
+                memorySuggestions = o.optJSONArray("memory_suggestions")?.toString() ?: "[]")
         }
+        private fun memoryIds(o: JSONObject): List<String> = o.optJSONArray("used_memory_ids")?.let { a ->
+            (0 until a.length()).map { a.getString(it) }
+        } ?: emptyList()
     }
 }

@@ -2,7 +2,7 @@
 
 独立 Android GUI Agent App，同时保留供 PC 导出应用索引的 helper 入口。任务在手机上执行，模型推理调用云端 Doubao 或用户选择的 OpenAI 兼容服务，不是离线模型。
 
-核对日期：2026-10-19；对应包含 OpenAI 双协议、浮窗与确认卡片、结果与通知的工作树。
+核对日期：2026-10-20；当前工作树为 1.5，包含本地记忆与经验积累；下方下载入口为已发布的 1.4。
 
 ## 架构与构建配置
 
@@ -16,7 +16,7 @@ Kotlin/Compose 提供 UI、前台 Service、无障碍截图/手势和 `DeviceBri
 | AGP / Gradle wrapper | 9.2.1 / 9.4.1 |
 | Chaquopy / Python | 17.0.0 / 3.12 |
 | ABI | arm64-v8a、x86_64 |
-| App versionName / versionCode | 1.4 / 5；与 Python 包版本独立 |
+| App versionName / versionCode | 1.5 / 6；与 Python 包版本独立 |
 
 PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，另装 Pillow 和 python-dotenv；没有安装 Gemini SDK。新安装默认使用 OpenAI 兼容接口，支持 Chat Completions 和 Responses。旧 SDK 没有 Responses resource 时，使用其认证 HTTP transport 请求 `/responses`，保留 Base URL 路径、认证及超时；安卓任务禁用自动重试，避免暂停后重发旧截图；不需要升级 APK 的 SDK。已有豆包设置继续使用原后端。
 
@@ -44,7 +44,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下载依赖。APK 大小随构建配置变化。若 Windows 中文路径下的 JVM 测试报告 ClassNotFoundException，可将相同源码复制到英文路径后运行 `testDebugUnitTest assembleDebug lintDebug`，并核对源码哈希。
 
-代码基线 `ec78e8d` 随附的 2026-10-19 验证记录（本次文档同步未重跑）：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **37 passed**，`assembleDebug` 成功。1.4 / versionCode 5 的 Debug APK 为 69,616,864 字节，包含两个 ABI；结果处理等 Python 模块已打包，APK v2 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **201 passed**；`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。未调用真实模型服务或进行真机回归。
+1.5 本轮核对（2026-10-20）：Python 在两套 SDK 环境各 **209 passed**，JVM **37 passed**，APK 构建及 Lint 通过（0 errors / 39 warnings）。最终验证阶段分别为 Python Android SDK 29.65 秒、Python PC SDK 30.73 秒、安卓单测强制重跑 + APK + Lint 73.08 秒，合计 **133.46 秒**，低于 5 分钟预算。使用 `testDebugUnitTest --rerun` 只强制重跑测试，不重装全部构建依赖。APK 为 **1.5 / versionCode 6**、69,896,328 字节；139 个构建输入文件哈希一致，记忆 Python 模块及界面已打包，两个 ABI、ZIP 完整性和 v2 签名已核对，签名证书与上一版一致。尚无本轮真机或真实模型服务验证。
+
+代码基线 `ec78e8d` 随附的 2026-10-19 验证记录：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **37 passed**，`assembleDebug` 成功。1.4 / versionCode 5 的 Debug APK 为 69,616,864 字节，包含两个 ABI；结果处理等 Python 模块已打包，APK v2 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **201 passed**；`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。未调用真实模型服务或进行真机回归。
 
 测试只补关键回归；本机依赖已备齐时，连续运行两套 Python 全量测试与强制重跑的 Android JVM suite，共 **183.91 秒（约 3 分 4 秒）**，低于 5 分钟预算。其中两轮 Python 各约 28 秒，Gradle 含依赖任务重跑约 127 秒；首次下载依赖的准备时间不作为 suite 耗时承诺。复现命令为对应 SDK 环境中的 `python -m pytest tests -q`，以及英文路径 Android 工程中的 `gradlew.bat --offline --no-daemon testDebugUnitTest --rerun-tasks`；APK 与 Lint 另用 `assembleDebug lintDebug` 验证。
 
@@ -61,6 +63,8 @@ macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下�
 敏感操作识别依赖关键词，不能保证覆盖所有风险动作。界面显示完成也需结合实际手机状态。OpenAI 请求失败、空文本或输出不完整会中止任务并记录失败；模型输出格式解析失败先等待后重试。豆包 API 异常同样中止并记录失败。交互细节、日志及验收范围见 [Android 交互说明](../docs/android-interactions.md)。
 
 ## 执行进度浮窗
+
+设置中新增“记忆与经验”入口，支持偏好与操作经验的增删改查、停用、清空及独立开关。任务完成时在同一个模型结束响应中总结经验，下次按相关性加载；失败不积累成功路径，差评暂停相关经验复用。个人偏好只建议，经用户确认才加入记忆库。详情见[记忆与经验说明](../docs/memory-and-learning.md)。
 
 浮窗由已连接的无障碍服务管理，使用 Android 的 [TYPE_ACCESSIBILITY_OVERLAY](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_ACCESSIBILITY_OVERLAY)，不需要额外申请“显示在其他应用上层”权限。浮窗平时不抢输入焦点；确认时默认聚焦拒绝，追问时允许输入文字。内容区域可滚动，控制按钮固定，按可用屏幕和键盘高度限制窗口；回答后收起键盘、退回目标页面并恢复。窗口以外的区域照常操作；无障碍服务销毁时清理窗口和状态订阅。
 

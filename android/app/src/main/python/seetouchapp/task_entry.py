@@ -130,6 +130,7 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
     from seetouch.core.task import Task
     from seetouch.device.android_native.controller import NativeAndroidController
     from seetouch.safety.guard import Guard
+    from seetouch.memory import MemoryStore
 
     runs_dir = os.path.join(str(DeviceBridge.filesDir()), "runs")
 
@@ -182,6 +183,7 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
         runs_dir=runs_dir,
         event_bus=_progress_bus(progress_callback) if progress_callback is not None else None,
         control=control, interaction=interact,
+        memory_store=MemoryStore(os.path.join(str(DeviceBridge.filesDir()), "agent_memory.json")),
     )
 
     task = Task(instruction=instruction, max_steps=max_steps,

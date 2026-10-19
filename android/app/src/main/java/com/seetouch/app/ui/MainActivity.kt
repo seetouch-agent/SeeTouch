@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun SeeTouchApp(settings: AppSettings, requestedId: String?, onHandled: () -> Unit) {
     var showSettings by remember { mutableStateOf(false) }
+    var showMemory by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<TaskResult?>(null) }
     var lastResultId by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -117,6 +118,7 @@ private fun SeeTouchApp(settings: AppSettings, requestedId: String?, onHandled: 
             result = state.result?.takeIf { it.taskId == requestedId }
                 ?: withContext(Dispatchers.IO) { TaskResultStore(context).load(requestedId) }
             showSettings = false
+            showMemory = false
             onHandled()
         }
     }
@@ -124,14 +126,15 @@ private fun SeeTouchApp(settings: AppSettings, requestedId: String?, onHandled: 
         val updated = state.result
         if (state.taskGeneration > 0 && updated != null) {
             if (result?.taskId == updated.taskId || lastResultId != updated.taskId) {
-                result = updated; showSettings = false
+                result = updated; showSettings = false; showMemory = false
             }
             lastResultId = updated.taskId
         }
     }
     when {
         result != null -> Column { TaskInteractionControls(state); ResultDetails(result!!) { result = null } }
-        showSettings -> Column(Modifier.safeDrawingPadding()) { TaskInteractionControls(state); SettingsScreen(settings) { showSettings = false } }
+        showMemory -> Column { TaskInteractionControls(state); AgentMemoryScreen { showMemory = false } }
+        showSettings -> Column(Modifier.safeDrawingPadding()) { TaskInteractionControls(state); SettingsScreen(settings, { showMemory = true }) { showSettings = false } }
         else -> TaskScreen(settings, { showSettings = true }, { result = it })
     }
     state.pendingConfirmation?.let { ConfirmationCard(it) }
@@ -315,7 +318,7 @@ private fun StepCard(step: StepInfo) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
+private fun SettingsScreen(settings: AppSettings, onOpenMemory: () -> Unit, onBack: () -> Unit) {
     var reasoner by remember { mutableStateOf(settings.reasoner) }
     var apiKey by remember { mutableStateOf(settings.apiKey) }
     var baseUrl by remember { mutableStateOf(settings.baseUrl) }
@@ -425,6 +428,7 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
             )
             Spacer(Modifier.height(12.dp))
             Text("浮窗与结果", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = onOpenMemory) { Text("记忆与经验：管理、检索和自动积累") }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = floatingEntry, onCheckedChange = {
                     floatingEntry = it; settings.floatingEntryEnabled = it

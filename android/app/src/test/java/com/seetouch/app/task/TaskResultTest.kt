@@ -18,13 +18,18 @@ class TaskResultTest {
     @Test fun answerUsageAndSourceSurvivePersistenceRoundTrip() {
         val result = TaskResult.fromRunner("""{"task_id":"task_answer","completed":true,
             "total_steps":3,"elapsed_seconds":4.5,"tokens":{"input":100,"output":40},
-            "answer":"明天晴","answer_source_step":2,"answer_screenshot":"/private/runs/task/step_002.png"}""",
+            "answer":"明天晴","answer_source_step":2,"answer_screenshot":"/private/runs/task/step_002.png",
+            "used_memory_ids":["memory_1"],"learned_memory_id":"learned_1","learning_status":"saved",
+            "memory_suggestions":[{"category":"preference","name":"天气","content":"显示温度"}]}""",
             "fallback", "查天气", 0, 0.0)
         assertEquals(result, TaskResult.fromJson(result.toJson()))
         assertEquals("明天晴", result.answer)
         assertEquals(2, result.sourceStep)
         assertEquals(100L, result.inputUsage)
         assertTrue(result.speechText.contains("明天晴"))
+        assertEquals(listOf("memory_1"), result.usedMemoryIds)
+        assertEquals("learned_1", result.learnedMemoryId)
+        assertEquals("saved", result.learningStatus)
     }
     @Test fun userStopCannotBeOverwrittenByALateModelSuccess() {
         val result = TaskResult.fromRunner("""{"completed":true}""", "task_stop", "任务", 3, 1.0, true)

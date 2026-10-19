@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from ..config import AppSettings, load_env
 from ..core.runner import Runner
@@ -23,6 +24,7 @@ from ..reasoning.factory import (
     DEFAULT_DEBUG_REASONER, DEFAULT_REASONER, REASONER_NAMES, create_reasoner,
 )
 from ..safety.guard import Guard
+from ..memory import MemoryStore
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--serial", default=None, help="Android 设备 serial(多设备时使用)")
     p_run.add_argument("--max-steps", type=int, default=None, help="单任务最大步数(默认 45)")
     p_run.add_argument("--runs-dir", default=None, help="运行产物输出目录(默认 ./runs)")
+    p_run.add_argument("--no-memory", action="store_true", help="本次不加载或积累本地记忆")
     p_run.add_argument(
         "--reasoner",
         choices=REASONER_NAMES,
@@ -97,6 +100,7 @@ def _cmd_run(args: argparse.Namespace, settings: AppSettings) -> int:
         reasoner=reasoner,
         guard=Guard(),
         runs_dir=runs_dir,
+        memory_store=None if args.no_memory else MemoryStore(Path.home() / ".seetouch" / "agent_memory.json"),
     )
 
     task = Task(instruction=args.instruction, max_steps=max_steps)

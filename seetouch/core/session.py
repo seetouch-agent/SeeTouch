@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,10 @@ class RunResult:
     answer: str = ""
     answer_source_step: int | None = None
     answer_screenshot: str | None = None
+    used_memory_ids: list[str] = field(default_factory=list)
+    learned_memory_id: str | None = None
+    learning_status: str = "disabled"
+    memory_suggestions: list[dict] = field(default_factory=list)
 
 
 class Session:
@@ -91,6 +95,10 @@ class Session:
         self._answer = ""
         self._answer_source_step: int | None = None
         self._answer_screenshot: str | None = None
+        self.used_memory_ids: list[str] = []
+        self.learned_memory_id: str | None = None
+        self.learning_status = "disabled"
+        self.memory_suggestions: list[dict] = []
 
     # ----------------------- 保存产物 -----------------------
 
@@ -133,6 +141,8 @@ class Session:
         usage_already_counted: bool = False,
     ) -> StepRecord:
         notes = list(notes or [])
+        if not self.history and self.used_memory_ids:
+            notes.append("本次匹配记忆：" + ", ".join(self.used_memory_ids))
         record = StepRecord(
             step=step,
             action=action_out.action,
@@ -214,6 +224,8 @@ class Session:
             reason_code=failure_code(self._aborted_reason),
             answer=self._answer, answer_source_step=self._answer_source_step,
             answer_screenshot=self._answer_screenshot,
+            used_memory_ids=self.used_memory_ids, learned_memory_id=self.learned_memory_id,
+            learning_status=self.learning_status, memory_suggestions=self.memory_suggestions,
         )
         summary_obj: dict[str, Any] = asdict(result)
         try:

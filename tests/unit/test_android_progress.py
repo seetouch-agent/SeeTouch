@@ -157,3 +157,19 @@ def test_native_confirmation_timeout_json_is_denied_in_python(entry, monkeypatch
         lambda _: '{"approved":false,"choice":"timeout"}'))
     assert not result["completed"] and result["reason_code"] == "user_denied"
     device.click.assert_not_called()
+
+
+def test_preference_suggestion_requires_confirmation_via_android_memory_bridge(entry, monkeypatch):
+    module, _ = entry
+    suggestion = {"category": "address", "name": "家", "content": "同济大学嘉定校区", "keywords": ["回家"]}
+    monkeypatch.setattr(module, "_create_reasoner", lambda _: SimpleNamespace(predict=lambda *_: ActionOutput(
+        Action("COMPLETE", {"memory_suggestions": [suggestion]}))))
+    result = json.loads(module.run_task("导航回家", "{}"))
+    path = Path(__file__).resolve().parents[2] / "android/app/src/main/python/seetouchapp/memory_entry.py"
+    spec = importlib.util.spec_from_file_location("memory_entry", path)
+    memory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(memory)
+    assert result["memory_suggestions"] == [suggestion]
+    assert json.loads(memory.command("list"))["entries"] == []
+    saved = json.loads(memory.command("confirm_suggestion", json.dumps(suggestion)))
+    assert saved["ok"] and saved["entries"][0]["source"] == "suggested"

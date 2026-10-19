@@ -57,7 +57,8 @@ def replay(session_dir: Path) -> int:
         labels = {"paused": "已暂停", "running": "继续执行", "waiting_user": "等待回答",
                   "takeover_start": "开始人工接管", "takeover_end": "结束人工接管",
                   "stopped": "终止", "user_stopped": "任务已终止",
-                  "ASK_USER": "追问", "user_answer": "用户回答", "TAKE_OVER": "请求人工接管"}
+                  "ASK_USER": "追问", "user_answer": "用户回答", "TAKE_OVER": "请求人工接管",
+                  "memory_loaded": "匹配本地记忆", "experience_saved": "保存操作经验"}
         for line in interactions_path.read_text(encoding="utf-8").splitlines():
             try:
                 event = json.loads(line)
@@ -68,6 +69,10 @@ def replay(session_dir: Path) -> int:
             except (ValueError, TypeError, KeyError):
                 continue
             detail = event.get("answer") or event.get("question") or event.get("reason") or ""
+            if event.get("type") == "memory_loaded":
+                detail = ", ".join(event.get("memory_ids", []))
+            elif event.get("type") == "experience_saved":
+                detail = event.get("memory_id", "")
             print(f"  {when} Step {event.get('step', '?')} {label} {detail}")
 
     if summary_path.exists():

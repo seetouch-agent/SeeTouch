@@ -47,6 +47,8 @@ from ..safety.guard import Guard
 from .session import RunResult, Session, StepResult
 from .task import Task
 from .exceptions import VLMAPIError
+from ..memory import MemoryStore
+from ..memory.learning import finish_learning, memory_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,7 @@ class Runner:
         action_settle_seconds: float = 1.0,
         control: ExecutionControl | None = None,
         interaction: Callable[[dict], dict] | None = None,
+        memory_store: MemoryStore | None = None,
     ):
         self.device = device
         self.reasoner = reasoner
@@ -93,6 +96,7 @@ class Runner:
         self.action_settle_seconds = action_settle_seconds
         self.control = control
         self.interaction = interaction
+        self.memory_store = memory_store
         self._interaction_context: list[str] = []
 
         # 运行状态(start() 初始化,step() 推进)
@@ -118,6 +122,14 @@ class Runner:
         self._pending_visual_request = None
         self._visual_baseline_app = None
         self._open_miss_count = 0
+        if self.memory_store:
+            try:
+                memories = self.memory_store.retrieve(task.instruction)
+                self._session.used_memory_ids = [m["id"] for m in memories]
+                self._session.record_interaction({"type": "memory_loaded", "step": 0,
+                                                  "memory_ids": self._session.used_memory_ids})
+            except (OSError, ValueError, KeyError, TypeError):
+                logger.warning("local memory unavailable; continuing without memory")
         logger.info(
             "start task: id=%s instruction=%r runs_dir=%s",
             task.task_id, task.instruction, self._session.dir,
@@ -144,7 +156,14 @@ class Runner:
             try:
                 revision = self._checkpoint()
                 self._check_takeover()
-                return self._step_once(step, revision, attempt)
+                result = self._step_once(step, revision, attempt)
+                if result.terminal and self.memory_store:
+                    try:
+                        finish_learning(self.memory_store, self._session, result.action)
+                    except (OSError, ValueError, KeyError, TypeError):
+                        self._session.learning_status = "error"
+                        logger.warning("experience save failed; task result preserved")
+                return result
             except ReobserveRequired:
                 attempt += 1
             except RunStopped:
@@ -192,6 +211,11 @@ class Runner:
         self._checkpoint(revision)
         try:
             instruction = task.instruction
+            if self.memory_store:
+                try:
+                    instruction += memory_prompt(self.memory_store, session.used_memory_ids)
+                except (OSError, ValueError, KeyError, TypeError):
+                    pass
             if self._interaction_context:
                 instruction += "\n\n用户补充（以用户回答为准）：\n" + "\n".join(self._interaction_context)
             out = self.reasoner.predict(instruction, screenshot, session.history)

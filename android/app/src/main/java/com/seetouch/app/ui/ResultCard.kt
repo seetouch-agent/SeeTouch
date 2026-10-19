@@ -11,6 +11,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.seetouch.app.task.TaskResult
 import com.seetouch.app.task.TaskResultStore
+import com.seetouch.app.task.AgentMemory
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,6 +40,7 @@ fun ResultCard(result: TaskResult) {
             Text("共 ${result.totalSteps} 步 · 用时 ${"%.1f".format(result.elapsedSeconds)} 秒")
             Text("模型用量：输入 ${result.inputUsage}，输出 ${result.outputUsage}")
             Text("实际扣费额度：服务商未返回，请以服务商账单为准", style = MaterialTheme.typography.bodySmall)
+            MemoryResultSection(result)
             if (result.answer.isNotBlank()) {
                 Text("查询答案", style = MaterialTheme.typography.titleMedium)
                 Text(result.answer)
@@ -59,6 +63,10 @@ fun ResultCard(result: TaskResult) {
                         store.saveFeedback(result.taskId, vote, text)
                     }.exceptionOrNull()?.let { "暂时无法保存评价，请重试" } }
                     saved = error == null
+                    if (saved) error = runCatching { AgentMemory.command("review", JSONObject()
+                        .put("task_id", result.taskId).put("positive", vote).put("used_ids", JSONArray(
+                            (result.usedMemoryIds + listOfNotNull(result.learnedMemoryId)).distinct()))) }
+                        .exceptionOrNull()?.let { "评价已保存；经验反馈未更新，请重试" }
                 }
             }) { Text(if (saved) "评价已保存，可修改" else "保存评价") }
             Text("评价仅保存在本机，不上传轨迹或截图", style = MaterialTheme.typography.bodySmall)

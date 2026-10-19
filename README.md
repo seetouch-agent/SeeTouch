@@ -14,6 +14,10 @@ SeeTouch 通过屏幕截图和视觉语言模型（VLM）理解手机界面，�
 
 Android App 不依赖电脑执行任务，但仍需联网调用云端模型。悬浮球可从当前应用发起任务；进度窗显示当前步骤、阶段及最近 5 步。App、浮窗和通知支持暂停、继续、终止、追问与接管；敏感确认显示截图标注和倒计时。任务结束提供持久化结果卡片、查询答案来源、完成通知、本地评价及可选语音播报；通知不展示屏幕摘要或答案。构建与安装见 [Android 指南](android/README.md)。
 
+Android 1.5 新增[本地记忆与经验积累](docs/memory-and-learning.md)：完成任务时由结束响应提炼通用经验，下次匹配相关任务后加载；可管理偏好、纠正或停用经验。个人偏好建议须确认保存，评价会影响操作经验的后续复用。每一步继续观察当前屏幕，经验不直接重放动作。
+
+记忆功能对应 1.5 源码及本地构建；当前公共安装包下载仍为 1.4。
+
 本说明对应 2026-10-19 的工作树，包含 Android OpenAI 兼容接口、连接测试、执行控制及追问/人工接管；运行验证范围见文末。
 
 ## 下载与安装
@@ -240,7 +244,7 @@ OPEN 按应用显示名查找并启动应用；无法匹配时反馈候选或通
 - Guard 依赖任务文本和模型摘要中的关键词，可能漏判；各入口的确认方式不同，见首表。
 - 截图、任务指令及历史摘要会发送给所选云端模型；本地截图、日志、trace 也可能包含聊天内容、账号或输入文本，当前没有自动脱敏。
 - Android key 使用普通 SharedPreferences 保存；备份规则和 exported 诊断入口尚待加固，见 [隐私审计](docs/privacy-audit.md)。
-- Android 已接入模型追问与人工接管，详见 [交互说明](docs/android-interactions.md)；CLI/Web 调试器尚未提供对应交互入口。暂未实现用户偏好、Playbook、Web/iOS/桌面控制；Python Protocol 提供扩展点。
+- Android 已接入模型追问与人工接管，详见 [交互说明](docs/android-interactions.md)；CLI/Web 调试器尚未提供对应交互入口。Android 与 PC CLI 支持本地偏好和经验检索；快速 Playbook、Web/iOS/桌面控制尚未实现，Python Protocol 提供扩展点。
 
 ## 开发与验证
 
@@ -249,6 +253,8 @@ python -m pip install -e ".[dev]"
 python -m pytest tests -q
 python -m ruff check seetouch
 ```
+
+1.5 本轮核对（2026-10-20）：两套 SDK 环境的 Python 全量测试各 **209 passed**，Android JVM **37 passed**；仅补记忆闭环、开关、反馈和存储异常等关键回归，并扩展已有序列化测试。最终各验证阶段连同 APK 构建和 Lint 合计 **133.46 秒**，低于 5 分钟。APK 为 1.5 / versionCode 6，包含两个 ABI；源码哈希、Python 记忆模块打包、APK 完整性与签名通过核对。Lint 0 errors / 39 warnings。真实模型的经验质量及重复任务收益尚未进行真机测量，详见[记忆与经验说明](docs/memory-and-learning.md)。
 
 代码基线 `ec78e8d` 随附的 2026-10-19 验证记录：在 Android 固定的 `openai==1.30.0` / `pydantic==1.10.22` / `httpx==0.27.2` 及 PC 最低 SDK `openai==1.66.0` 两套环境中，`tests/` 各 **201 passed**；`ruff check seetouch`、该代码批次的 Python 测试/入口检查和 `git diff --check` 通过。测试覆盖真实 SDK 的 mock HTTP 请求，不调用真实模型服务或操作手机。该代码批次仅新增确认、结果、通知隐私等关键回归，重复映射和简单展示不单独写测试；完整 suite 以 5 分钟内为预算，实测见 Android 指南。
 

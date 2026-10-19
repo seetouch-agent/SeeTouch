@@ -127,7 +127,7 @@ def _normalize_parsed_action(
         return None
 
     if action_type in (ACTION_COMPLETE, ACTION_ANSWER):
-        final_params = {k: params[k] for k in ("answer", "source_step", "status", "reason") if k in params}
+        final_params = {k: params[k] for k in ("answer", "source_step", "status", "reason", "experience", "memory_suggestions") if k in params}
         if action_type == ACTION_ANSWER and "answer" not in final_params and "text" in params:
             final_params["answer"] = params["text"]
         action = Action(type=action_type, parameters=final_params)
