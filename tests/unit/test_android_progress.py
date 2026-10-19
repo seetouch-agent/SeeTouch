@@ -136,3 +136,24 @@ def test_interaction_bridge_returns_to_fresh_observation(entry, monkeypatch, kin
     if kind == "ASK_USER":
         assert "回答：乙" in prompts[1] and "回答：乙" in steps[0]["notes"][0]
     reasoner._client.close.assert_called_once()
+
+
+def test_floating_entry_preserves_current_app_and_returns_answer_source(entry, monkeypatch):
+    module, device = entry
+    monkeypatch.setattr(module, "_create_reasoner", lambda _: SimpleNamespace(predict=lambda *_: ActionOutput(
+        Action("ANSWER", {"answer": "当前页面的查询答案", "source_step": 1}))))
+    result = json.loads(module.run_task("查询当前页面", '{"start_from_current":true,"task_id":"task_from_ball"}'))
+    device.go_home.assert_not_called()
+    assert result["task_id"] == "task_from_ball" and result["answer_source_step"] == 1
+    assert result["answer"] == "当前页面的查询答案"
+    assert result["answer_screenshot"].endswith("step_001.png")
+
+
+def test_native_confirmation_timeout_json_is_denied_in_python(entry, monkeypatch):
+    module, device = entry
+    monkeypatch.setattr(module, "_create_reasoner", lambda _: SimpleNamespace(predict=lambda *_: ActionOutput(
+        Action("CLICK", {"point": [500, 300]}), action_summary="确认发送消息")))
+    result = json.loads(module.run_task("发送消息", "{}", None,
+        lambda _: '{"approved":false,"choice":"timeout"}'))
+    assert not result["completed"] and result["reason_code"] == "user_denied"
+    device.click.assert_not_called()

@@ -14,6 +14,7 @@ from PIL import Image
 from ..core.action import Action, ActionOutput
 from ..reasoning.base import StepRecord
 from .task import Task
+from .outcome import failure_code
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,11 @@ class RunResult:
     runs_dir: str = ""
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    elapsed_seconds: float = 0.0
+    reason_code: str | None = None
+    answer: str = ""
+    answer_source_step: int | None = None
+    answer_screenshot: str | None = None
 
 
 class Session:
@@ -81,6 +87,10 @@ class Session:
         self._tokens_in: int = 0
         self._tokens_out: int = 0
         self._pending_interactions: list[dict[str, Any]] = []
+        self._screenshots: dict[int, Path] = {}
+        self._answer = ""
+        self._answer_source_step: int | None = None
+        self._answer_screenshot: str | None = None
 
     # ----------------------- 保存产物 -----------------------
 
@@ -88,7 +98,21 @@ class Session:
         suffix = f"_retry_{attempt}" if attempt else ""
         path = self.dir / f"step_{step:03d}{suffix}.png"
         image.save(path, format="PNG")
+        self._screenshots[step] = path
         return path
+
+    def set_answer(self, parameters: dict[str, Any], current_step: int) -> None:
+        self._answer = parameters.get("answer", parameters.get("text", "")) or ""
+        if not self._answer:
+            return
+        source = parameters.get("source_step", current_step)
+        # Never invent an evidence image for a missing/future source step.
+        if source not in self._screenshots:
+            self.record_interaction({"type": "invalid_answer_source", "step": current_step, "requested_step": source})
+            return
+        self._answer_source_step = source
+        path = self._screenshots.get(source)
+        self._answer_screenshot = str(path) if path else None
 
     def record_interaction(self, event: dict[str, Any]) -> None:
         """Questions/control boundaries only; never records a human's device operations."""
@@ -106,6 +130,7 @@ class Session:
         screenshot_path: Path | None = None,
         reasoning_time: float = 0.0,
         execution_time: float = 0.0,
+        usage_already_counted: bool = False,
     ) -> StepRecord:
         notes = list(notes or [])
         record = StepRecord(
@@ -118,7 +143,8 @@ class Session:
             notes=notes,
         )
         self.history.append(record)
-        self._accumulate_usage(action_out.usage)
+        if not usage_already_counted:
+            self._accumulate_usage(action_out.usage)
         self._append_trace(
             record, screenshot_path, action_out.usage,
             prompt_text=action_out.prompt_text,
@@ -128,6 +154,10 @@ class Session:
         return record
 
     # ----------------------- 状态 -----------------------
+
+    def account_prediction(self, usage: dict[str, Any] | None) -> None:
+        """Count received predictions, including those held/discarded after a pause."""
+        self._accumulate_usage(usage)
 
     def consecutive_failures(self) -> int:
         count = 0
@@ -180,9 +210,12 @@ class Session:
             runs_dir=str(self.dir),
             total_input_tokens=self._tokens_in,
             total_output_tokens=self._tokens_out,
+            elapsed_seconds=round(time.time() - self._start_ts, 2),
+            reason_code=failure_code(self._aborted_reason),
+            answer=self._answer, answer_source_step=self._answer_source_step,
+            answer_screenshot=self._answer_screenshot,
         )
         summary_obj: dict[str, Any] = asdict(result)
-        summary_obj["elapsed_seconds"] = round(time.time() - self._start_ts, 2)
         try:
             self.summary_path.write_text(
                 json.dumps(summary_obj, ensure_ascii=False, indent=2),

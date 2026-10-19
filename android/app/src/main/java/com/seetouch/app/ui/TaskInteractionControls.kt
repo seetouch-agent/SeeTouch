@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +42,8 @@ fun returnToTarget(context: Context, action: () -> Unit) {
     var current: Context? = context
     while (current is ContextWrapper && current !is Activity) current = current.baseContext
     (current as? Activity)?.moveTaskToBack(true)
+    MainActivity.hideIfVisible()
+    VoiceReplyActivity.closeForResume()
     Handler(Looper.getMainLooper()).postDelayed({
         if (TaskController.state.value.taskGeneration == generation) action()
     }, 250)
@@ -49,7 +53,19 @@ fun returnToTarget(context: Context, action: () -> Unit) {
 fun TaskInteractionControls(state: TaskUiState) {
     val context = LocalContext.current
     val active = state.workerActive && state.status != TaskStatus.STOPPED
-    if (active) {
+    if (active && state.status == TaskStatus.TAKEOVER) {
+        Card(Modifier.fillMaxWidth()) {
+            Column {
+                Text("请手动完成当前操作")
+                Text(state.controlReason)
+                Text("接管期间不截图、不上传、不自动操作")
+                Row {
+                    OutlinedButton(onClick = { returnToTarget(context) { TaskController.resume() } }) { Text("我已完成，继续") }
+                    TextButton(onClick = { TaskController.stop() }) { Text("终止任务") }
+                }
+            }
+        }
+    } else if (active) {
         Row {
             if (state.status in setOf(TaskStatus.PAUSED, TaskStatus.TAKEOVER)) {
                 OutlinedButton(onClick = { returnToTarget(context) { TaskController.resume() } }) { Text("继续") }
@@ -72,6 +88,7 @@ fun TaskInteractionControls(state: TaskUiState) {
 
     state.pendingQuestion?.let { question ->
         var answer by remember(question.id) { mutableStateOf("") }
+        LaunchedEffect(question.voiceRevision) { if (question.voiceRevision > 0) answer = question.voiceDraft }
         var voiceError by remember(question.id) { mutableStateOf<String?>(null) }
         val speech = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) result.data

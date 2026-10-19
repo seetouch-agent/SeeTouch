@@ -1,6 +1,8 @@
 package com.seetouch.app.task
 
 import android.util.Log
+import android.content.Context
+import com.seetouch.app.settings.AppSettings
 import com.chaquo.python.Python
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -8,8 +10,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Executors
+import java.util.UUID
 
 object TaskController {
     private const val TAG = "SeeTouchTask"
@@ -18,12 +21,24 @@ object TaskController {
     private val running = AtomicBoolean(false)
     private val control = TaskControl()
     private val expectedRevision = ThreadLocal<Long?>()
-    private var confirmFuture: CompletableFuture<Boolean>? = null
+    private var confirmGate: ConfirmationGate? = null
+    private var confirmationTimeout = 60
+    private var appContext: Context? = null
+    private val persistence = Executors.newSingleThreadExecutor()
+    private var runId = ""
+    private var startedNanos = 0L
     private var interactionFuture: CompletableFuture<String>? = null
     private var questionId = 0L
     private var confirmationId = 0L
     private var taskGeneration = 0L
     val isRunning: Boolean get() = running.get()
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        TaskResultStore(context).latest()?.let { result ->
+            _state.value = TaskUiState(status = result.status, instruction = result.instruction, result = result)
+        }
+    }
 
     fun expectRevision(revision: Long) { expectedRevision.set(revision) }
     fun <T> withDeviceAction(operation: () -> T): T = control.dispatch(expectedRevision.get(), operation)
@@ -33,13 +48,17 @@ object TaskController {
         if (!running.compareAndSet(false, true)) return
         try {
             synchronized(control) {
+                startedNanos = System.nanoTime()
+                runId = "task_${System.currentTimeMillis() / 1000}_${UUID.randomUUID().toString().take(6)}"
+                confirmationTimeout = JSONObject(taskConfigJson).optInt("confirmation_timeout", 60).coerceIn(10, 600)
+                appContext?.let { AppSettings(it).rememberInstruction(instruction) }
                 control.start()
                 _state.value = TaskUiState(status = TaskStatus.RUNNING, instruction = instruction,
                     workerActive = true, taskGeneration = ++taskGeneration,
                     maxSteps = JSONObject(taskConfigJson).optInt("max_steps", 45).coerceIn(1, 200))
             }
             val result = Python.getInstance().getModule("seetouchapp.task_entry").callAttr(
-                "run_task", instruction, taskConfigJson,
+                "run_task", instruction, JSONObject(taskConfigJson).put("task_id", runId).toString(),
                 { json: String -> onStep(json); Unit },
                 { message: String -> awaitConfirmation(message) },
                 { json: String -> onProgress(json); Unit },
@@ -50,14 +69,13 @@ object TaskController {
         } catch (t: Throwable) {
             Log.e(TAG, "task crashed", t)
             synchronized(control) {
-                if (control.mode != TaskStatus.STOPPED)
-                    _state.update { it.copy(status = TaskStatus.ERROR, errorDetail = t.toString()) }
+                finishResult(JSONObject().put("status", "error").put("detail", t.toString()).toString())
             }
         } finally {
             synchronized(control) {
-                confirmFuture?.complete(false)
+                confirmGate?.cancel("stopped")
                 interactionFuture?.complete(reply("stopped"))
-                confirmFuture = null; interactionFuture = null
+                confirmGate = null; interactionFuture = null
                 control.finish()
                 expectedRevision.remove()
                 _state.update { it.copy(workerActive = false, pendingConfirmation = null, pendingQuestion = null) }
@@ -69,7 +87,7 @@ object TaskController {
     fun pause() = synchronized(control) {
         if (control.mode !in setOf(TaskStatus.RUNNING, TaskStatus.WAITING_USER)) return@synchronized
         changeMode(TaskStatus.PAUSED, "已暂停，继续后重新观察屏幕")
-        confirmFuture?.complete(false)
+        confirmGate?.cancel("interrupted")
         _state.update { it.copy(pendingConfirmation = null) }
     }
 
@@ -84,15 +102,16 @@ object TaskController {
         if (!control.transition(TaskStatus.STOPPED)) return@synchronized
         _state.update { it.copy(status = TaskStatus.STOPPED, pendingQuestion = null,
             pendingConfirmation = null, resultSummary = "已终止，不再下发新操作；正在结束当前请求") }
-        confirmFuture?.complete(false)
+        confirmGate?.cancel("stopped")
         interactionFuture?.complete(reply("stopped"))
+        finishResult("{}")
     }
 
     fun requestTakeover(reason: String = "用户选择我来操作") = synchronized(control) {
         if (!control.active || control.mode == TaskStatus.STOPPED || control.mode == TaskStatus.TAKEOVER)
             return@synchronized
         changeMode(TaskStatus.TAKEOVER, reason)
-        confirmFuture?.complete(false)
+        confirmGate?.cancel("interrupted")
         interactionFuture?.complete(reply("interrupted"))
         _state.update { it.copy(pendingConfirmation = null, pendingQuestion = null) }
     }
@@ -107,11 +126,19 @@ object TaskController {
         interactionFuture?.complete(reply("answered", answer.trim()))
     }
 
+    fun setVoiceDraft(id: Long, draft: String) = synchronized(control) {
+        _state.update { state ->
+            val question = state.pendingQuestion
+            if (question?.id != id) state else state.copy(pendingQuestion = question.copy(
+                voiceDraft = draft, voiceRevision = question.voiceRevision + 1))
+        }
+    }
+
     fun respondToConfirmation(approved: Boolean, id: Long? = null) = synchronized(control) {
         val pending = _state.value.pendingConfirmation ?: return@synchronized
         if ((id != null && pending.id != id) || control.mode != TaskStatus.RUNNING) return@synchronized
+        confirmGate?.respond(approved)
         _state.update { it.copy(pendingConfirmation = null) }
-        confirmFuture?.complete(approved)
     }
 
     fun resetIfFinished() { if (!running.get()) _state.value = TaskUiState() }
@@ -134,17 +161,19 @@ object TaskController {
         }.onFailure { Log.w(TAG, "invalid progress", it) }
     }
 
-    private fun awaitConfirmation(message: String): Boolean {
-        val future = CompletableFuture<Boolean>()
+    private fun awaitConfirmation(message: String): String {
+        val gate = ConfirmationGate(confirmationTimeout)
         synchronized(control) {
-            if (control.mode != TaskStatus.RUNNING) return false
-            confirmFuture = future
-            _state.update { it.copy(pendingConfirmation = PendingConfirmation.fromRunnerMessage(message)
-                .copy(id = ++confirmationId)) }
+            if (control.mode != TaskStatus.RUNNING) {
+                gate.cancel("interrupted"); return gate.await()
+            }
+            confirmGate = gate
+            _state.update { it.copy(pendingConfirmation = PendingConfirmation.fromRequest(message)
+                .copy(id = ++confirmationId, deadlineNanos = gate.deadlineNanos)) }
         }
-        return try { future.get(5, TimeUnit.MINUTES) } catch (_: Exception) { false }
+        return try { gate.await() }
         finally { synchronized(control) {
-            if (confirmFuture === future) { confirmFuture = null; _state.update { it.copy(pendingConfirmation = null) } }
+            if (confirmGate === gate) { confirmGate = null; _state.update { it.copy(pendingConfirmation = null) } }
         } }
     }
 
@@ -174,18 +203,21 @@ object TaskController {
         } finally { synchronized(control) { if (interactionFuture === future) interactionFuture = null } }
     }
 
-    private fun onFinished(json: String) = synchronized(control) {
-        if (control.mode == TaskStatus.STOPPED) {
-            _state.update { it.copy(resultSummary = "任务已终止") }; return@synchronized
-        }
-        val o = JSONObject(json)
-        if (o.optString("status") == "error") {
-            _state.update { it.copy(status = TaskStatus.ERROR, errorDetail = o.optString("detail")) }
-        } else {
-            val completed = o.optBoolean("completed")
-            _state.update { it.copy(status = if (completed) TaskStatus.COMPLETED else TaskStatus.ABORTED,
-                resultSummary = "${if (completed) "任务完成" else "任务中止"}，共 ${o.optInt("total_steps")} 步" +
-                    o.optString("aborted_reason").takeIf { r -> r.isNotBlank() && r != "null" }?.let { r -> "（$r）" }.orEmpty()) }
+    private fun onFinished(json: String) = synchronized(control) { finishResult(json) }
+
+    private fun finishResult(json: String) {
+        val parsed = TaskResult.fromRunner(json, runId, _state.value.instruction, _state.value.steps.size,
+            (System.nanoTime() - startedNanos) / 1e9, control.mode == TaskStatus.STOPPED)
+        val previous = _state.value.result
+        val result = if (parsed.status == TaskStatus.STOPPED && previous?.taskId == parsed.taskId)
+            parsed.copy(elapsedSeconds = previous.elapsedSeconds) else parsed
+        _state.update { it.copy(status = result.status, result = result,
+            pendingConfirmation = null, pendingQuestion = null,
+            resultSummary = "${result.statusLabel}，共 ${result.totalSteps} 步") }
+        appContext?.let { context ->
+            persistence.execute { runCatching { TaskResultStore(context).save(result) }
+                .onFailure { Log.w(TAG, "cannot save task result", it) } }
+            ResultSpeaker.speak(context, result, AppSettings(context).speakResults)
         }
     }
 

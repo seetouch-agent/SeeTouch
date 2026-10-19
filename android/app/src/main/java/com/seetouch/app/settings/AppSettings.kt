@@ -3,6 +3,7 @@ package com.seetouch.app.settings
 import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONObject
+import org.json.JSONArray
 import java.net.URI
 
 /** 新安装使用通用接口；已有豆包配置保留原服务和思考设置。 */
@@ -93,11 +94,31 @@ class AppSettings internal constructor(private val prefs: SharedPreferences) {
         get() = prefs.getInt("max_steps", 45)
         set(value) = prefs.edit().putInt("max_steps", value).apply()
 
+    var confirmationTimeout: Int
+        get() = prefs.getInt("confirmation_timeout", 60).coerceIn(10, 600)
+        set(value) { require(value in 10..600); prefs.edit().putInt("confirmation_timeout", value).apply() }
+    var speakResults: Boolean
+        get() = prefs.getBoolean("speak_results", false)
+        set(value) = prefs.edit().putBoolean("speak_results", value).apply()
+    var floatingEntryEnabled: Boolean
+        get() = prefs.getBoolean("floating_entry", true)
+        set(value) = prefs.edit().putBoolean("floating_entry", value).apply()
+
+    fun recentInstructions(): List<String> = runCatching {
+        val a = JSONArray(prefs.getString("recent_instructions", "[]"))
+        (0 until a.length()).map { a.getString(it) }
+    }.getOrDefault(emptyList())
+    fun rememberInstruction(instruction: String) {
+        prefs.edit().putString("recent_instructions", JSONArray(
+            (listOf(instruction) + recentInstructions()).distinct().take(3)).toString()).apply()
+    }
+
     fun toTaskConfigJson(): String = JSONObject()
         .put("reasoner", reasoner)
         .put("api_key", apiKey)
         .put("model_id", modelId)
         .put("max_steps", maxSteps)
+        .put("confirmation_timeout", confirmationTimeout)
         .apply {
             if (reasoner == "doubao") {
                 put("api_url", baseUrl)

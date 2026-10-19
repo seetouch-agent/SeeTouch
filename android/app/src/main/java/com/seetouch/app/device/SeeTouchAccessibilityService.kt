@@ -12,6 +12,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.seetouch.app.overlay.TaskProgressOverlay
+import com.seetouch.app.overlay.FloatingTaskEntry
 import com.seetouch.app.task.TaskController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +35,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var overlayJob: Job? = null
     @Volatile private var progressOverlay: TaskProgressOverlay? = null
+    @Volatile private var floatingEntry: FloatingTaskEntry? = null
 
     @Volatile
     private var foregroundPackage: String? = null
@@ -43,9 +45,12 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         instance = this
         overlayJob?.cancel()
         progressOverlay?.close()
+        floatingEntry?.close()
         val overlay = TaskProgressOverlay(this)
         progressOverlay = overlay
-        overlayJob = overlayScope.launch { TaskController.state.collect { overlay.render(it) } }
+        val entry = FloatingTaskEntry(this)
+        floatingEntry = entry
+        overlayJob = overlayScope.launch { TaskController.state.collect { overlay.render(it); entry.render(it) } }
         Log.i(TAG, "accessibility service connected")
     }
 
@@ -54,6 +59,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         overlayScope.cancel()
         progressOverlay?.close()
         progressOverlay = null
+        floatingEntry?.close(); floatingEntry = null
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -76,6 +82,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         progressOverlay?.onConfigurationChanged()
+        refreshFloatingEntry()
     }
 
     // ------------------------- 查询 -------------------------
@@ -199,7 +206,9 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     // ------------------------- 文本输入 -------------------------
 
     /** 向当前焦点输入框写入文本(替换原内容),支持中文。 */
-    fun setTextOnFocused(text: String): Boolean {
+    fun setTextOnFocused(text: String): Boolean = withoutProgressOverlay { setUnobstructedText(text) }
+
+    private fun setUnobstructedText(text: String): Boolean {
         val node = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             ?: findEditableNode(rootInActiveWindow)
             ?: return false
@@ -226,9 +235,9 @@ class SeeTouchAccessibilityService : AccessibilityService() {
 
     // ------------------------- 全局导航 -------------------------
 
-    fun pressBack(): Boolean = controlled { performGlobalAction(GLOBAL_ACTION_BACK) }
+    fun pressBack(): Boolean = withoutProgressOverlay { controlled { performGlobalAction(GLOBAL_ACTION_BACK) } }
 
-    fun pressHome(): Boolean = controlled { performGlobalAction(GLOBAL_ACTION_HOME) }
+    fun pressHome(): Boolean = withoutProgressOverlay { controlled { performGlobalAction(GLOBAL_ACTION_HOME) } }
 
     /** Explicit notification-control navigation, outside automated task actions. */
     fun dismissNotificationShade() {
@@ -239,8 +248,14 @@ class SeeTouchAccessibilityService : AccessibilityService() {
 
     private fun <T> withoutProgressOverlay(operation: () -> T): T {
         val overlay = progressOverlay
-        return if (overlay == null) operation() else overlay.withoutOverlay(operation)
+        val entry = floatingEntry
+        val take = { if (overlay == null) operation() else overlay.withoutOverlay(operation) }
+        return if (entry == null) take() else entry.withoutOverlay(take)
     }
+
+    fun refreshFloatingEntry() { floatingEntry?.render(TaskController.state.value) }
+    fun acceptsEntryVoice(id: Long): Boolean = floatingEntry?.acceptsVoice(id) == true
+    fun setEntryVoiceDraft(id: Long, text: String?) { floatingEntry?.voiceDraft(id, text) }
 
     companion object {
         private const val TAG = "SeeTouchA11y"

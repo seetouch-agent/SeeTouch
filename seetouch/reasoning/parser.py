@@ -20,6 +20,7 @@ from ..core.action import (
     ACTION_WAIT,
     ACTION_ASK_USER,
     ACTION_TAKE_OVER,
+    ACTION_ANSWER,
     VALID_ACTIONS,
     Action,
 )
@@ -125,8 +126,16 @@ def _normalize_parsed_action(
             )
         return None
 
-    if action_type == ACTION_COMPLETE:
-        return Action(type=ACTION_COMPLETE, parameters={})
+    if action_type in (ACTION_COMPLETE, ACTION_ANSWER):
+        final_params = {k: params[k] for k in ("answer", "source_step", "status", "reason") if k in params}
+        if action_type == ACTION_ANSWER and "answer" not in final_params and "text" in params:
+            final_params["answer"] = params["text"]
+        action = Action(type=action_type, parameters=final_params)
+        try:
+            action.validate()
+        except ValueError:
+            return None
+        return action
 
     if action_type in (ACTION_ASK_USER, ACTION_TAKE_OVER):
         action = Action(type=action_type, parameters={

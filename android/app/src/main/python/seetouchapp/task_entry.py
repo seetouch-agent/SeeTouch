@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import traceback
+from dataclasses import asdict
 
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,14 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
             return False
         return bool(_call(confirm_callback, message))
 
+    def confirm_request(request: dict) -> dict | bool:
+        if confirm_callback is None:
+            return {"approved": False, "choice": "unavailable"}
+        response = _call(confirm_callback, json.dumps(request, ensure_ascii=False))
+        if isinstance(response, bool):
+            return response
+        return json.loads(str(response))
+
     device = NativeAndroidController()
     _notify_progress(progress_callback, "starting", 0)
     # 先回桌面:agent 跟手机同机运行,不先退到后台的话
@@ -149,7 +158,8 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
     if control:
         try:
             device.set_control_revision(control.checkpoint())
-            device.go_home()
+            if not config.get("start_from_current", False):
+                device.go_home()
         except RunStopped:
             pass
         except Exception:
@@ -157,7 +167,8 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
             if control.snapshot()[0] == "running":
                 raise
     else:
-        device.go_home()
+        if not config.get("start_from_current", False):
+            device.go_home()
 
     def interact(request: dict) -> dict:
         if interaction_callback is None:
@@ -167,13 +178,14 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
     runner = Runner(
         device=device,
         reasoner=reasoner,
-        guard=Guard(prompt_fn=prompt),
+        guard=Guard(prompt_fn=prompt, request_fn=confirm_request),
         runs_dir=runs_dir,
         event_bus=_progress_bus(progress_callback) if progress_callback is not None else None,
         control=control, interaction=interact,
     )
 
-    task = Task(instruction=instruction, max_steps=max_steps)
+    task = Task(instruction=instruction, max_steps=max_steps,
+                **({"task_id": config["task_id"]} if config.get("task_id") else {}))
     runner.start(task)
     try:
         next_step = 1
@@ -187,6 +199,7 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
         summary = runner.session.summarize()
         return json.dumps(
             {
+                **asdict(summary),
                 "completed": summary.completed,
                 "aborted_reason": summary.aborted_reason,
                 "total_steps": summary.total_steps,
@@ -230,4 +243,5 @@ def _step_summary(result) -> dict:
         "terminal": result.terminal,
         "terminal_reason": result.terminal_reason,
         "reasoning_time": round(result.reasoning_time, 2),
+        "screenshot_path": str(result.screenshot_path) if result.screenshot_path else None,
     }

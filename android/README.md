@@ -2,7 +2,7 @@
 
 独立 Android GUI Agent App，同时保留供 PC 导出应用索引的 helper 入口。任务在手机上执行，模型推理调用云端 Doubao 或用户选择的 OpenAI 兼容服务，不是离线模型。
 
-核对日期：2026-10-19；对应包含 OpenAI 双协议、执行控制、追问与人工接管的工作树。
+核对日期：2026-10-19；对应包含 OpenAI 双协议、浮窗与确认卡片、结果与通知的工作树。
 
 ## 架构与构建配置
 
@@ -16,7 +16,7 @@ Kotlin/Compose 提供 UI、前台 Service、无障碍截图/手势和 `DeviceBri
 | AGP / Gradle wrapper | 9.2.1 / 9.4.1 |
 | Chaquopy / Python | 17.0.0 / 3.12 |
 | ABI | arm64-v8a、x86_64 |
-| App versionName / versionCode | 1.3 / 4；与 Python 包版本独立 |
+| App versionName / versionCode | 1.4 / 5；与 Python 包版本独立 |
 
 PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，另装 Pillow 和 python-dotenv；没有安装 Gemini SDK。新安装默认使用 OpenAI 兼容接口，支持 Chat Completions 和 Responses。旧 SDK 没有 Responses resource 时，使用其认证 HTTP transport 请求 `/responses`，保留 Base URL 路径、认证及超时；安卓任务禁用自动重试，避免暂停后重发旧截图；不需要升级 APK 的 SDK。已有豆包设置继续使用原后端。
 
@@ -34,22 +34,25 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下载依赖。APK 大小随构建配置变化。若 Windows 中文路径下的 JVM 测试报告 ClassNotFoundException，可将相同源码复制到英文路径后运行 `testDebugUnitTest assembleDebug lintDebug`，并核对源码哈希。
 
-2026-10-19 验证：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **26 passed**，`assembleDebug` 成功。1.3 / versionCode 4 的 Debug APK 约 69.5 MB，包含两个 ABI；Responses Python 模块已打包，APK 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **191 passed**；`lintDebug` 通过，0 errors / 28 warnings（版本、风格和国际化建议）。未调用真实模型服务或进行真机回归。
+2026-10-19 验证：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **37 passed**，`assembleDebug` 成功。1.4 / versionCode 5 的 Debug APK 为 69,616,864 字节，包含两个 ABI；结果处理等 Python 模块已打包，APK v2 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **201 passed**；`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。未调用真实模型服务或进行真机回归。
+
+测试只补关键回归；本机依赖已备齐时，连续运行两套 Python 全量测试与强制重跑的 Android JVM suite，共 **183.91 秒（约 3 分 4 秒）**，低于 5 分钟预算。其中两轮 Python 各约 28 秒，Gradle 含依赖任务重跑约 127 秒；首次下载依赖的准备时间不作为 suite 耗时承诺。复现命令为对应 SDK 环境中的 `python -m pytest tests -q`，以及英文路径 Android 工程中的 `gradlew.bat --offline --no-daemon testDebugUnitTest --rerun-tasks`；APK 与 Lint 另用 `assembleDebug lintDebug` 验证。
 
 ## 独立 App 使用
 
 1. 安装 APK，在系统设置中启用 SeeTouch 无障碍服务。
 2. 在设置页填写 API Key、Base URL 和支持图片输入的模型 ID；Key 默认隐藏，可切换显示。Base URL 保留服务商要求的路径前缀，去掉末尾的 `/chat/completions` 或 `/responses`。OpenAI 模型 ID 必填；豆包留空使用原默认模型。
 3. 可点击“测试连接”，发送内置示例图和固定问题，显示响应耗时或故障分类；使用当前填写的配置，不会保存配置或截取手机屏幕。按服务商说明选择 Chat Completions 或 Responses；失败后不会自动切换协议。高级设置中可选思考强度、请求超时（5–600 秒）和最大步数（1–200）；模型默认不发送思考参数。两种后端分别保存凭据，原豆包 thinking 选择继续有效。
-4. 回任务页输入指令并开始。入口先回桌面，再由前台 Service 执行；进度浮窗会出现在目标应用上方，显示当前步骤、观察/思考/执行阶段及操作摘要。拖动标题可移动，点“收起/展开”可切换大小。
-5. App、浮窗和通知栏均可暂停、继续或终止。继续前重新截图；暂停期间返回的模型结果保留但不执行。登录、密码、验证码等页面会请求人工接管，也可主动点“我来操作”；完成后点继续。模型缺少信息时可追问，支持选项、文字和 App 内的系统语音回答，5 分钟未回答自动暂停。首次使用通知控制需允许通知权限。
-6. 命中敏感动作规则时，浮窗会展开完整的可滚动确认信息，只有点“允许执行”后才继续；也可拒绝，5 分钟未确认默认拒绝。App 内的确认弹窗仍可使用。任务结束后浮窗显示结果，6 秒后自动关闭；完整步骤时间线保留在 App 内。
+4. 回任务页输入指令并开始，此入口先回桌面；也可点悬浮球输入文字、使用系统语音或选最近指令，从当前应用开始。悬浮球可拖动、贴边、在设置关闭。执行进度窗显示当前步骤、观察/思考/执行阶段和操作摘要；拖动标题移动，点“最近5步”展开记录。
+5. App、浮窗和通知栏均可暂停、继续或终止。继续前重新截图；暂停期间返回的模型结果保留但不执行。登录、密码、验证码等页面会请求人工接管，也可主动点“我来操作”；完成后点“我已完成，继续”。追问支持选项、文字和系统语音，语音只填草稿，5 分钟未回答自动暂停。首次使用通知控制需允许通知权限。
+6. 命中敏感动作规则时，App 或浮窗展示截图、目标标注、操作说明、可能后果和倒计时；只有点“允许本次”才放行。默认焦点为“拒绝”，默认 60 秒未确认拒绝，可在设置改为 10–600 秒。任务结束后浮窗 6 秒自动关闭；独立的结束通知保留，点击打开对应结果卡片。
+7. 结果卡片包含状态、原因与建议、步数、耗时、模型输入/输出用量；服务商未返回扣费额度时明确提示以账单为准。查询答案可打开对应步骤截图。可保存、修改本地评价；可在设置开启结果 TTS，默认关闭。通知仅显示指令摘要与状态，不展示截图、模型界面摘要、追问内容或答案；锁屏隐藏指令。
 
 敏感操作识别依赖关键词，不能保证覆盖所有风险动作。界面显示完成也需结合实际手机状态。OpenAI 请求失败、空文本或输出不完整会中止任务并记录失败；模型输出格式解析失败先等待后重试。豆包 API 异常同样中止并记录失败。交互细节、日志及验收范围见 [Android 交互说明](../docs/android-interactions.md)。
 
 ## 执行进度浮窗
 
-浮窗由已连接的无障碍服务管理，使用 Android 的 [TYPE_ACCESSIBILITY_OVERLAY](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_ACCESSIBILITY_OVERLAY)，不需要额外申请“显示在其他应用上层”权限。浮窗平时不抢输入焦点；追问时允许输入文字，回答后收起键盘并恢复。窗口以外的区域照常操作；无障碍服务销毁时会清理窗口和状态订阅。
+浮窗由已连接的无障碍服务管理，使用 Android 的 [TYPE_ACCESSIBILITY_OVERLAY](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_ACCESSIBILITY_OVERLAY)，不需要额外申请“显示在其他应用上层”权限。浮窗平时不抢输入焦点；确认时默认聚焦拒绝，追问时允许输入文字。内容区域可滚动，控制按钮固定，按可用屏幕和键盘高度限制窗口；回答后收起键盘、退回目标页面并恢复。窗口以外的区域照常操作；无障碍服务销毁时清理窗口和状态订阅。
 
 Python Runner 的事件通过可选阶段回调送入 `TaskController` 的 StateFlow，App 和浮窗共用状态。步数上限是执行预算，不能当成已完成百分比，因此显示“第 N 步”和“最多 N 步”。进度回调异常不会改变执行结果。
 

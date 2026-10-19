@@ -5,7 +5,8 @@ import org.json.JSONObject
 /** 任务生命周期状态。 */
 enum class TaskStatus { IDLE, RUNNING, PAUSED, WAITING_USER, TAKEOVER, STOPPED, COMPLETED, ABORTED, ERROR }
 
-data class PendingQuestion(val id: Long, val question: String, val options: List<String>)
+data class PendingQuestion(val id: Long, val question: String, val options: List<String>,
+    val voiceDraft: String = "", val voiceRevision: Long = 0)
 
 /** 单步执行摘要(task_entry.py _step_summary 的 Kotlin 映射)。 */
 data class StepInfo(
@@ -17,6 +18,7 @@ data class StepInfo(
     val success: Boolean?,
     val notes: List<String>,
     val reasoningTime: Double,
+    val screenshotPath: String? = null,
 ) {
     companion object {
         fun fromJson(json: String): StepInfo {
@@ -34,14 +36,23 @@ data class StepInfo(
                 success = if (o.isNull("success")) null else o.optBoolean("success"),
                 notes = notes,
                 reasoningTime = o.optDouble("reasoning_time", 0.0),
+                screenshotPath = o.optString("screenshot_path").takeIf { it.isNotBlank() && it != "null" },
             )
         }
     }
 }
 
 /** 敏感动作待确认信息。 */
-data class PendingConfirmation(val message: String, val id: Long = 0) {
+data class PendingConfirmation(val message: String, val id: Long = 0,
+    val screenshotPath: String? = null, val action: String = "", val parameters: String = "{}",
+    val consequences: String = "", val deadlineNanos: Long = 0) {
     companion object {
+        fun fromRequest(message: String): PendingConfirmation = runCatching {
+            val o = JSONObject(message)
+            PendingConfirmation(o.getString("description"), screenshotPath = o.optString("screenshot_path")
+                .takeIf { it.isNotBlank() && it != "null" }, action = o.optString("action"),
+                parameters = o.optJSONObject("parameters")?.toString() ?: "{}", consequences = o.optString("consequences"))
+        }.getOrElse { fromRunnerMessage(message) }
         fun fromRunnerMessage(message: String): PendingConfirmation = PendingConfirmation(
             message.lineSequence().filterNot {
                 val line = it.trim()
@@ -66,4 +77,5 @@ data class TaskUiState(
     val pendingQuestion: PendingQuestion? = null,
     val controlReason: String = "",
     val taskGeneration: Long = 0,
+    val result: TaskResult? = null,
 )

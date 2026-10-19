@@ -12,6 +12,7 @@
 
     <!-- Android 11+ 包可见性:声明需要查询所有桌面可启动应用 -->
     <queries>
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -28,6 +29,9 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.SeeTouch">
+
+        <activity android:name=".ui.VoiceReplyActivity" android:exported="false"
+            android:excludeFromRecents="true" android:taskAffinity="" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- 主入口:任务输入 + 实时时间线 + 敏感动作确认 + 设置 -->
         <activity

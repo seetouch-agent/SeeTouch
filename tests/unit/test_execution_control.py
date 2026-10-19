@@ -82,8 +82,9 @@ def test_pause_discards_stale_click_retains_response_and_reobserves(running_task
         if len(calls) == 1:
             ready.set()
             assert release.wait(2)
-            return ActionOutput(Action("CLICK", {"point": [100, 200]}), raw_output="old decision")
-        return ActionOutput(Action("COMPLETE"))
+            return ActionOutput(Action("CLICK", {"point": [100, 200]}), raw_output="old decision",
+                                usage={"input_tokens": 5, "output_tokens": 3})
+        return ActionOutput(Action("COMPLETE"), usage={"input_tokens": 7, "output_tokens": 2})
 
     runner, device, _, control, results, errors, worker, _ = running_task(predict)
     try:
@@ -107,6 +108,8 @@ def test_pause_discards_stale_click_retains_response_and_reobserves(running_task
         pending = next(event for event in held if event["type"] == "held_decision")
         assert pending["raw_output"] == "old decision" and not pending["executed"]
         assert (runner.session.dir / "step_001_retry_1.png").exists()
+        summary = runner.session.summarize()
+        assert (summary.total_input_tokens, summary.total_output_tokens) == (12, 5)
     finally:
         release.set()
 

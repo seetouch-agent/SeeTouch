@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-ActionType = Literal["CLICK", "TYPE", "SCROLL", "OPEN", "BACK", "WAIT", "COMPLETE", "ASK_USER", "TAKE_OVER"]
+ActionType = Literal["CLICK", "TYPE", "SCROLL", "OPEN", "BACK", "WAIT", "COMPLETE", "ASK_USER", "TAKE_OVER", "ANSWER"]
 
 
 ACTION_CLICK: ActionType = "CLICK"
@@ -21,10 +21,11 @@ ACTION_WAIT: ActionType = "WAIT"
 ACTION_COMPLETE: ActionType = "COMPLETE"
 ACTION_ASK_USER: ActionType = "ASK_USER"
 ACTION_TAKE_OVER: ActionType = "TAKE_OVER"
+ACTION_ANSWER: ActionType = "ANSWER"
 
 VALID_ACTIONS: frozenset[str] = frozenset(
     {ACTION_CLICK, ACTION_TYPE, ACTION_SCROLL, ACTION_OPEN, ACTION_BACK, ACTION_WAIT,
-     ACTION_COMPLETE, ACTION_ASK_USER, ACTION_TAKE_OVER}
+     ACTION_COMPLETE, ACTION_ASK_USER, ACTION_TAKE_OVER, ACTION_ANSWER}
 )
 
 
@@ -79,6 +80,19 @@ class Action:
             reason = self.parameters.get("reason")
             if not isinstance(reason, str) or not reason.strip():
                 raise ValueError("TAKE_OVER requires a nonempty reason")
+        elif self.type in (ACTION_COMPLETE, ACTION_ANSWER):
+            answer = self.parameters.get("answer", self.parameters.get("text"))
+            if self.type == ACTION_ANSWER and (not isinstance(answer, str) or not answer.strip()):
+                raise ValueError("ANSWER requires nonempty answer text")
+            if answer is not None and not isinstance(answer, str):
+                raise ValueError("answer must be text")
+            source = self.parameters.get("source_step")
+            if source is not None and (type(source) is not int or source < 1):
+                raise ValueError("source_step must be a positive step number")
+            if self.parameters.get("status", "completed") not in ("completed", "failed"):
+                raise ValueError("terminal status must be completed or failed")
+            if "reason" in self.parameters and not isinstance(self.parameters["reason"], str):
+                raise ValueError("terminal reason must be text")
         # COMPLETE: no params required
 
 

@@ -1,6 +1,12 @@
 package com.seetouch.app.ui
 
 import android.content.Intent
+import androidx.compose.material3.Switch
+import com.seetouch.app.task.TaskResult
+import com.seetouch.app.task.TaskResultStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.lang.ref.WeakReference
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -14,12 +20,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,33 +66,82 @@ import com.seetouch.app.task.TaskUiState
 import com.seetouch.app.task.TaskProgressDisplay
 
 class MainActivity : ComponentActivity() {
+    private var requestedResultId by mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent); setIntent(intent)
+        requestedResultId = intent.getStringExtra(EXTRA_RESULT_ID)
+        val state = TaskController.state.value
+        if (state.workerActive && state.status == TaskStatus.RUNNING && state.pendingConfirmation == null) TaskController.pause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        visibleActivity = WeakReference(this)
+        val state = TaskController.state.value
+        if (state.workerActive && state.status == TaskStatus.RUNNING && state.pendingConfirmation == null) TaskController.pause()
+    }
+
+    override fun onStop() {
+        if (visibleActivity?.get() === this) visibleActivity = null
+        super.onStop()
+    }
+
+    companion object {
+        const val EXTRA_RESULT_ID = "result_task_id"
+        private var visibleActivity: WeakReference<MainActivity>? = null
+        fun hideIfVisible() { visibleActivity?.get()?.moveTaskToBack(true) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settings = AppSettings(this)
+        requestedResultId = intent.getStringExtra(EXTRA_RESULT_ID)
         setContent {
             MaterialTheme {
-                SeeTouchApp(settings)
+                SeeTouchApp(settings, requestedResultId) { requestedResultId = null }
             }
         }
     }
 }
 
 @Composable
-private fun SeeTouchApp(settings: AppSettings) {
+private fun SeeTouchApp(settings: AppSettings, requestedId: String?, onHandled: () -> Unit) {
     var showSettings by remember { mutableStateOf(false) }
-    if (showSettings) {
-        SettingsScreen(settings, onBack = { showSettings = false })
-    } else {
-        TaskScreen(settings, onOpenSettings = { showSettings = true })
+    var result by remember { mutableStateOf<TaskResult?>(null) }
+    var lastResultId by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val state by TaskController.state.collectAsState()
+    LaunchedEffect(requestedId) {
+        if (requestedId != null) {
+            result = state.result?.takeIf { it.taskId == requestedId }
+                ?: withContext(Dispatchers.IO) { TaskResultStore(context).load(requestedId) }
+            showSettings = false
+            onHandled()
+        }
     }
+    LaunchedEffect(state.result) {
+        val updated = state.result
+        if (state.taskGeneration > 0 && updated != null) {
+            if (result?.taskId == updated.taskId || lastResultId != updated.taskId) {
+                result = updated; showSettings = false
+            }
+            lastResultId = updated.taskId
+        }
+    }
+    when {
+        result != null -> Column { TaskInteractionControls(state); ResultDetails(result!!) { result = null } }
+        showSettings -> Column(Modifier.safeDrawingPadding()) { TaskInteractionControls(state); SettingsScreen(settings) { showSettings = false } }
+        else -> TaskScreen(settings, { showSettings = true }, { result = it })
+    }
+    state.pendingConfirmation?.let { ConfirmationCard(it) }
 }
 
 // ============================ 任务页 ============================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
+private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit, onOpenResult: (TaskResult) -> Unit) {
     val context = LocalContext.current
     val state by TaskController.state.collectAsState()
     var instruction by remember { mutableStateOf("") }
@@ -166,29 +221,14 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
             StatusLine(state)
+            state.result?.let { result -> TextButton(onClick = { onOpenResult(result) }) { Text("查看任务结果") } }
             TaskInteractionControls(state)
             Spacer(Modifier.height(8.dp))
             StepTimeline(state.steps)
         }
     }
 
-    state.pendingConfirmation?.let { pending ->
-        AlertDialog(
-            onDismissRequest = { /* 必须显式选择 */ },
-            title = { Text("敏感动作待确认") },
-            text = { Text(pending.message) },
-            confirmButton = {
-                TextButton(onClick = { returnToTarget(context) { TaskController.respondToConfirmation(true, pending.id) } }) {
-                    Text("允许执行")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { TaskController.respondToConfirmation(false) }) {
-                    Text("拒绝")
-                }
-            },
-        )
-    }
+
 }
 
 @Composable
@@ -289,6 +329,9 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
     var showAdvanced by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
     var saved by remember { mutableStateOf(false) }
+    var confirmationTimeout by remember { mutableStateOf(settings.confirmationTimeout.toString()) }
+    var speakResults by remember { mutableStateOf(settings.speakResults) }
+    var floatingEntry by remember { mutableStateOf(settings.floatingEntryEnabled) }
     val reasoningOptions = listOf(
         "" to "模型默认",
         "none" to "关闭（需模型支持）",
@@ -381,6 +424,26 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
                 singleLine = true,
             )
             Spacer(Modifier.height(12.dp))
+            Text("浮窗与结果", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = floatingEntry, onCheckedChange = {
+                    floatingEntry = it; settings.floatingEntryEnabled = it
+                    SeeTouchAccessibilityService.instance?.refreshFloatingEntry()
+                })
+                Text("显示悬浮球入口")
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = speakResults, onCheckedChange = {
+                    speakResults = it; settings.speakResults = it
+                    if (!it) com.seetouch.app.task.ResultSpeaker.stop()
+                })
+                Text("任务结束后语音播报")
+            }
+            OutlinedTextField(value = confirmationTimeout,
+                onValueChange = { confirmationTimeout = it.filter(Char::isDigit); saved = false },
+                label = { Text("敏感操作确认超时（秒）") },
+                supportingText = { Text("默认 60 秒；可设置 10–600 秒，超时自动拒绝") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true)
             TextButton(onClick = { showAdvanced = !showAdvanced }) {
                 Text(if (showAdvanced) "收起高级设置" else "高级设置：思考强度、超时与步数")
             }
@@ -441,12 +504,14 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
                     val steps = maxSteps.toIntOrNull()
                     saveError = AppSettings.validateConnection(
                         reasoner, apiKey, baseUrl, modelId, apiMode, timeout ?: 0,
-                    ) ?: if (steps == null || steps !in 1..200) "最大步数应为 1–200" else null
+                    ) ?: if (steps == null || steps !in 1..200) "最大步数应为 1–200"
+                    else if (confirmationTimeout.toIntOrNull()?.let { it !in 10..600 } != false) "确认超时应为 10–600 秒" else null
                     if (saveError == null && timeout != null && steps != null) {
                         settings.saveConnection(
                             reasoner, apiKey, baseUrl, modelId, apiMode, timeout,
                             thinkingMode, reasoningEffort, steps,
                         )
+                        settings.confirmationTimeout = confirmationTimeout.toInt()
                         saved = true
                     }
                 },

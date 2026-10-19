@@ -53,7 +53,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
     - 开屏广告、弹窗广告:点右上角"关闭""跳过"或 X 按钮先关闭。
     - 登录、密码、短信验证码、二次验证、生物识别、滑块验证、支付密码：输出 TAKE_OVER 并说明原因，等待用户手动完成，绝不能索要或代填凭据。
     - 系统弹窗(授权、相册、定位、通知等):若与任务直接相关则点"允许""同意"中心位置;否则点"取消""稍后"。
-    - 网络异常 / 应用崩溃 / 加载失败:若是临时弹窗,点"重试""确定";若界面无法继续,输出 COMPLETE 并在 action_summary 说明。
+    - 网络异常 / 应用崩溃 / 加载失败:若是临时弹窗,点"重试""确定";若无法继续，输出 COMPLETE，parameters 为 {{"status":"failed","reason":"model_unable"}}，不要声称成功。
     - **桌面找不到目标 app(因 OPEN 视觉兜底失败而回到桌面)**:
       - **硬规则**:如果历史 Step 的"备注"里出现 `OPEN '<app>' 失败(视觉兜底)` 字样,本步**绝对不要**再输出 OPEN(无论同名还是其他名字),必须 CLICK 桌面图标 / SCROLL 翻页 / 输出 COMPLETE 中的一种。再次 OPEN 一定会再次失败,导致死循环。(注:`未匹配到应用` 的备注不适用此规则,那时应按提示重新 OPEN。)
       - 先在当前桌面页面找目标 app 图标。
@@ -64,7 +64,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
       - **找不到时,SCROLL 水平方向翻页**:向左翻 `start_point=[800,500] -> end_point=[200,500]`,向右翻反向。多数桌面有 2-5 页,按需多翻几页。
       - 部分手机(MIUI 抽屉模式、原生 Android)需要从下往上 SCROLL `[500,900] -> [500,300]` 打开应用抽屉查看全部 app。
       - 找到目标 app 图标后 CLICK 图标中心。
-      - **何时放弃**:已经翻完所有桌面页 + 探索过名字相关的文件夹 + (如有抽屉)抽屉也滚到底,仍找不到,输出 COMPLETE 并在 action_summary 说明"未找到目标 app"。不要无止境翻页。
+      - **何时放弃**:已经翻完所有桌面页 + 探索过名字相关的文件夹 + (如有抽屉)抽屉也滚到底,仍找不到，输出 COMPLETE，parameters 为 {{"status":"failed","reason":"app_not_installed"}}。不要声称成功，也不要无止境翻页。
 11. 当前页面不是任务需要的页面时(例如打开 app 后停在了上次的搜索结果页、误进了详情页 / 子页面、或想重新开始一个流程),输出 BACK 返回上一层,不要卡在原地、也不要反复点击同一个控件。
     - BACK 用于"退一层"或"关掉当前弹窗 / 页面",回到上一个界面。
     - 注意:在 app 首页再按 BACK 可能直接退出 app;需要重新进入时改用 OPEN。
@@ -75,7 +75,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
 {{
   "screen_summary": "<根据当前截图、用户任务总结当前界面和任务进度>",
   "action_summary": "<根据当前截图、用户任务总结本步要执行的操作>",
-  "action": "<CLICK|TYPE|SCROLL|OPEN|BACK|WAIT|COMPLETE|ASK_USER|TAKE_OVER>",
+  "action": "<CLICK|TYPE|SCROLL|OPEN|BACK|WAIT|COMPLETE|ASK_USER|TAKE_OVER|ANSWER>",
   "parameters": {{}}
 }}
 
@@ -89,6 +89,8 @@ parameters 参数规则:
 - COMPLETE: {{}}
 - ASK_USER: {{"question":"请选择哪一个收件人？","options":["张三","张三丰"]}}
 - TAKE_OVER: {{"reason":"需要用户在目标应用完成登录"}}
+- ANSWER: {{"answer":"从页面读到的完整查询答案","source_step":当前或历史截图步骤号}}，给出答案后结束任务。不得编造页面上没有的信息。
+- COMPLETE 可附 {{"answer":"查询答案","source_step":步骤号}}；无法完成时必须附 {{"status":"failed","reason":"model_unable"}}，不能把失败当完成。
 
 WAIT 的使用场景:
 - 应用刚启动还在加载(看到 logo / loading / 骨架屏)

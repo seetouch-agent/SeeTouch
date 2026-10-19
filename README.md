@@ -10,9 +10,9 @@ SeeTouch 通过屏幕截图和视觉语言模型（VLM）理解手机界面，�
 |---|---|---|---|
 | PC 命令行 `run` | ADB + uiautomator2 | 默认 Gemini；可选 `--reasoner doubao` 或 `--reasoner openai` | 命中关键词规则后在终端确认 |
 | PC Web 调试器 `debug` | ADB + uiautomator2 | 默认 Doubao，可用 `--reasoner` 选择 Gemini / OpenAI | **当前自动批准，尚未接入交互确认** |
-| Android 独立 App | 无障碍服务 + Kotlin/Python 桥接 | 新安装默认 OpenAI 兼容接口，支持 Chat Completions / Responses；保留旧豆包配置 | App 或浮窗确认，5 分钟超时拒绝 |
+| Android 独立 App | 无障碍服务 + Kotlin/Python 桥接 | 新安装默认 OpenAI 兼容接口，支持 Chat Completions / Responses；保留旧豆包配置 | App、浮窗或通知确认，默认 60 秒超时拒绝 |
 
-Android App 不依赖电脑执行任务，但仍需联网调用云端模型。执行时使用可拖动、可收起的浮窗显示当前步骤、思考/执行阶段和操作摘要；支持在 App、浮窗和通知栏暂停、继续、终止，缺少信息时追问，登录验证时人工接管；设置页提供连接测试。敏感动作可在浮窗确认。构建与安装见 [Android 指南](android/README.md)。
+Android App 不依赖电脑执行任务，但仍需联网调用云端模型。悬浮球可从当前应用发起任务；进度窗显示当前步骤、阶段及最近 5 步。App、浮窗和通知支持暂停、继续、终止、追问与接管；敏感确认显示截图标注和倒计时。任务结束提供持久化结果卡片、查询答案来源、完成通知、本地评价及可选语音播报；通知不展示屏幕摘要或答案。构建与安装见 [Android 指南](android/README.md)。
 
 本说明对应 2026-10-19 的工作树，包含 Android OpenAI 兼容接口、连接测试、执行控制及追问/人工接管；运行验证范围见文末。
 
@@ -227,9 +227,9 @@ python -m pytest tests -q
 python -m ruff check seetouch
 ```
 
-2026-10-19：在 Android 固定的 `openai==1.30.0` / `pydantic==1.10.22` / `httpx==0.27.2` 及 PC 最低 SDK `openai==1.66.0` 两套环境中，`tests/` 各 **191 passed**；`ruff check seetouch`、本次修改的 Python 测试/入口检查和 `git diff --check` 通过。测试覆盖真实 SDK 的 mock HTTP 请求，不调用真实模型服务或操作手机。
+2026-10-19：在 Android 固定的 `openai==1.30.0` / `pydantic==1.10.22` / `httpx==0.27.2` 及 PC 最低 SDK `openai==1.66.0` 两套环境中，`tests/` 各 **201 passed**；`ruff check seetouch`、本次修改的 Python 测试/入口检查和 `git diff --check` 通过。测试覆盖真实 SDK 的 mock HTTP 请求，不调用真实模型服务或操作手机。本次仅新增确认、结果、通知隐私等关键回归，重复映射和简单展示不单独写测试；完整 suite 以 5 分钟内为预算，实测见 Android 指南。
 
-Android 英文路径构建副本与工作树源码哈希一致：`testDebugUnitTest` **26 passed**，`assembleDebug` 成功。APK 为 **1.3（versionCode 4）**，包含 arm64-v8a / x86_64，约 69.5 MB；已核对 Python 模块打包及 APK 签名。`lintDebug` 通过，0 errors / 28 warnings（版本、风格和国际化建议）。
+Android 英文路径构建副本与工作树源码哈希一致：`testDebugUnitTest` **37 passed**，`assembleDebug` 成功。APK 为 **1.4（versionCode 5）**，包含 arm64-v8a / x86_64，约 69.6 MB；已核对 Python 模块打包及 APK 签名。`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。
 
 用户真机验证：CLI 通过 DeepSeek 的 OpenAI 兼容 Chat Completions 接口，在小米 Android 16 手机上执行“打开小红书”，最大步数设置为 3，人工确认应用成功打开。此记录未注明具体模型 ID 和实际执行步数；Responses 尚无真实服务成功验证记录。此 CLI 历史验证不能作为独立 App 回归结果。
 

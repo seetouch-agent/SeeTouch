@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 from .control import ExecutionControl, ReobserveRequired, RunStopped
+from .outcome import api_failure_code
 
 from .event_bus import (
     EventBus,
@@ -31,6 +32,7 @@ from ..core.action import (
     ACTION_WAIT,
     ACTION_ASK_USER,
     ACTION_TAKE_OVER,
+    ACTION_ANSWER,
     Action,
 )
 from ..device.base import (
@@ -197,7 +199,7 @@ class Runner:
             self._checkpoint(revision)
             from .action import ActionOutput
 
-            reason = f"reasoning_failed: {exc}"
+            reason = f"reasoning_failed: {api_failure_code(exc)}: {exc}"
             logger.error("%s", reason)
             reasoning_time = time.perf_counter() - t0
             out = ActionOutput(
@@ -205,7 +207,7 @@ class Runner:
                 action_summary="模型调用失败，任务终止",
             )
             session.record_step(
-                step, out, execution_success=False, notes=[reason],
+                step, out, usage_already_counted=True, execution_success=False, notes=[reason],
                 screenshot_path=screenshot_path, reasoning_time=reasoning_time,
             )
             session.mark_aborted(reason)
@@ -219,6 +221,7 @@ class Runner:
                 terminal=True, terminal_reason=reason,
             )
         reasoning_time = time.perf_counter() - t0
+        session.account_prediction(out.usage)
         session.record_interaction({"type": "model_decision", "step": step,
                                     "action": out.action.type, "parameters": out.action.parameters,
                                     "raw_output": out.raw_output, "screenshot": str(screenshot_path)})
@@ -268,7 +271,7 @@ class Runner:
                                                 "question": out.action.parameters["question"],
                                                 "answer": answer})
                     interaction_notes.append(f"问题：{out.action.parameters['question']}\n回答：{answer}")
-            session.record_step(step, out, execution_success=None,
+            session.record_step(step, out, usage_already_counted=True, execution_success=None,
                                 screenshot_path=screenshot_path, reasoning_time=reasoning_time,
                                 notes=interaction_notes)
             if step >= task.max_steps:
@@ -280,34 +283,45 @@ class Runner:
                               "max_steps_reached" if self._finished else None)
 
         # 3. COMPLETE 不需要 guard,也不执行任何设备动作
-        if out.action.type == ACTION_COMPLETE:
+        if out.action.type in (ACTION_COMPLETE, ACTION_ANSWER):
+            failed = out.action.parameters.get("status") == "failed"
+            terminal_reason = (out.action.parameters.get("reason") or "model_unable") if failed else "completed"
+            if failed and terminal_reason not in ("model_unable", "app_not_installed", "blacklisted_app"):
+                terminal_reason = "model_unable"
             session.record_step(
-                step, out, execution_success=True,
+                step, out, usage_already_counted=True, execution_success=not failed,
                 screenshot_path=screenshot_path,
                 reasoning_time=reasoning_time, execution_time=0.0,
             )
-            session.mark_completed()
+            if failed:
+                session.mark_aborted(str(terminal_reason))
+            else:
+                session.set_answer(out.action.parameters, step)
+                session.mark_completed()
             self._finished = True
-            logger.info("task completed at step %d", step)
+            logger.info("task ended at step %d: %s", step, terminal_reason)
             return StepResult(
                 step=step, screenshot=screenshot, screenshot_path=screenshot_path,
                 prompt_text=out.prompt_text, raw_output=out.raw_output,
                 reasoning_content=out.reasoning_content,
                 action=out.action, screen_summary=out.screen_summary,
-                action_summary=out.action_summary, execution_success=True,
+                action_summary=out.action_summary, execution_success=not failed,
                 notes=[], usage=out.usage,
                 reasoning_time=reasoning_time, execution_time=0.0,
-                terminal=True, terminal_reason="completed",
+                terminal=True, terminal_reason=terminal_reason,
             )
 
         # 4. 敏感动作拦截
         if self.guard.needs_confirmation(task, out):
             approved = self.guard.ask(out, screenshot_path=str(screenshot_path))
+            session.record_interaction({"type": "confirmation", "step": step,
+                "action": out.action.type, "parameters": out.action.parameters,
+                "screenshot": str(screenshot_path), **self.guard.last_decision})
             self._checkpoint(revision)
             if not approved:
                 notes = ["user_denied_sensitive_action"]
                 session.record_step(
-                    step, out, execution_success=None, notes=notes,
+                    step, out, usage_already_counted=True, execution_success=None, notes=notes,
                     screenshot_path=screenshot_path,
                     reasoning_time=reasoning_time, execution_time=0.0,
                 )
@@ -388,7 +402,7 @@ class Runner:
 
         # 7. 记录
         session.record_step(
-            step, out, execution_success=success, notes=notes,
+            step, out, usage_already_counted=True, execution_success=success, notes=notes,
             screenshot_path=screenshot_path,
             reasoning_time=reasoning_time, execution_time=execution_time,
         )

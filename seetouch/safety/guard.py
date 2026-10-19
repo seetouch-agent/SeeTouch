@@ -11,9 +11,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Callable
 
-from ..core.action import ACTION_COMPLETE, ActionOutput
+from ..core.action import ACTION_COMPLETE, ACTION_ANSWER, ActionOutput
 from ..core.task import Task
 
 
@@ -51,7 +52,7 @@ def task_is_sensitive(instruction: str) -> bool:
 
 
 def action_is_sensitive(out: ActionOutput) -> bool:
-    if out.action.type == ACTION_COMPLETE:
+    if out.action.type in (ACTION_COMPLETE, ACTION_ANSWER):
         return False
     haystack = " ".join([out.action_summary or "", out.screen_summary or ""])
     if not haystack.strip():
@@ -71,8 +72,11 @@ def _default_cli_prompt(message: str) -> bool:
 class Guard:
     """组合 task-level 和 action-level 判断,负责拦截+提示。"""
 
-    def __init__(self, prompt_fn: Callable[[str], bool] | None = None):
+    def __init__(self, prompt_fn: Callable[[str], bool] | None = None,
+                 request_fn: Callable[[dict], dict | bool] | None = None):
         self._prompt = prompt_fn or _default_cli_prompt
+        self._request = request_fn
+        self.last_decision: dict = {}
 
     def needs_confirmation(self, task: Task, out: ActionOutput) -> bool:
         if not task_is_sensitive(task.instruction):
@@ -96,6 +100,22 @@ class Guard:
             lines.append(f"截图路径:{screenshot_path}")
         lines.append("继续执行?[y/N]: ")
         message = "\n".join(lines)
-        approved = self._prompt(message)
+        if self._request:
+            text = " ".join((out.action_summary, out.screen_summary))
+            consequence = next((meaning for words, meaning in (
+                (("支付", "付款", "转账", "提现"), "可能产生扣款、转账或余额变化"),
+                (("订单", "下单", "购买", "叫车"), "可能提交订单、产生费用或预约服务"),
+                (("发送", "发布", "发表"), "内容可能发送给他人或公开发布"),
+                (("删除", "清除"), "内容可能被删除，且无法恢复"),
+            ) if any(word in text for word in words)), "可能提交信息或改变当前应用的数据")
+            reply = self._request({"action": out.action.type, "parameters": out.action.parameters,
+                "description": out.action_summary or f"执行 {out.action.type}",
+                "consequences": consequence, "screenshot_path": screenshot_path})
+            self.last_decision = reply if isinstance(reply, dict) else {"approved": bool(reply)}
+            approved = self.last_decision.get("approved") is True
+        else:
+            approved = self._prompt(message)
+            self.last_decision = {"approved": approved, "choice": "allow" if approved else "deny"}
+        self.last_decision["decided_at"] = time.time()
         logger.info("guard.ask -> %s", "approved" if approved else "denied")
         return approved
