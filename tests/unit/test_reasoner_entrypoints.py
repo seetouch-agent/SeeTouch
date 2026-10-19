@@ -103,10 +103,23 @@ def test_android_openai_requires_explicit_model_and_uses_chat(android_entry):
     assert isinstance(reasoner, OpenAIReasoner)
     assert reasoner._config.api_mode == "chat_completions"
     assert reasoner._config.reasoning_effort == "low"
-    with pytest.raises(ValueError, match="Chat Completions only"):
-        android_entry._create_reasoner({
-            "reasoner": "openai", "api_key": "test", "api_mode": "responses",
+
+
+@pytest.mark.parametrize("mode", ["chat_completions", "responses"])
+def test_android_passes_protocol_timeout_and_effort(android_entry, mode):
+    with patch("openai.OpenAI", return_value=Mock()) as constructor:
+        reasoner = android_entry._create_reasoner({
+            "reasoner": "openai", "api_key": " test-key ", "model_id": " vision ",
+            "base_url": "https://proxy.example/custom/v1/", "api_mode": mode,
+            "timeout": 120, "reasoning_effort": "high",
         })
+    assert reasoner._config.api_mode == mode
+    assert reasoner._config.reasoning_effort == "high"
+    constructor.assert_called_once_with(
+        api_key="test-key", base_url="https://proxy.example/custom/v1",
+        timeout=120.0, max_retries=1,
+    )
+    assert reasoner._config.model_id == "vision"
 
 
 def test_debugger_passes_selected_backend_to_factory(tmp_path):

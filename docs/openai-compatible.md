@@ -1,6 +1,6 @@
 # OpenAI 兼容 API 配置指南
 
-CLI、Web 调试器和 Android App 共用 `OpenAIReasoner`。CLI 默认 Gemini，调试器和 Android 默认 Doubao；使用兼容接口需要显式选择后端。
+CLI、Web 调试器和 Android App 共用 `OpenAIReasoner`。CLI 默认 Gemini，调试器默认 Doubao；Android 新安装默认使用 OpenAI 兼容接口，已有豆包配置保留原后端。
 
 ## PC 配置
 
@@ -31,9 +31,11 @@ Chat Completions 通过 `reasoning_effort` 传递，Responses 通过 `reasoning.
 
 ## Android
 
-设置页选择 OpenAI 兼容接口后填写对应的 key、Base URL 和模型 ID。各后端独立存储凭据；切换后端不会自动复制 key。旧版本豆包配置与 thinking 设置继续有效。
+设置页填写对应的 key、Base URL 和支持图片输入的模型 ID，并选择 Chat Completions 或 Responses；程序不会在失败后自动改用另一协议。Key 默认隐藏，模型 ID 始终显示；保存及启动前校验连接配置。高级设置提供思考强度、5–600 秒请求超时和 1–200 最大步数。各后端独立存储凭据；保存豆包不会覆盖 OpenAI 高级参数，保存 OpenAI 也不改变豆包 thinking 设置。
 
-APK 保留 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，只支持 Chat Completions。未安装 Gemini SDK，不提供 Gemini 后端或 Responses 模式。
+APK 保留 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，支持 Chat Completions 与 Responses。旧 SDK 没有 Responses resource 时，通过其认证 HTTP transport 请求 `/responses` 并解码输出及用量，保留自定义路径、认证、超时和重试。未安装 Gemini SDK，不提供 Gemini 后端。
+
+Responses 输出按 [OpenAI 官方文档](https://developers.openai.com/api/docs/guides/structured-outputs) 检查完成状态；不完整响应不会作为可执行动作使用。不同服务商对图片输入、协议和思考参数的支持需分别验证，接口兼容不保证每个模型都能使用。
 
 ## 失败与验证边界
 

@@ -70,12 +70,11 @@ def _create_reasoner(config: dict):
     if name == "openai":
         from seetouch.reasoning.openai import OpenAIConfig, OpenAIReasoner
 
-        if config.get("api_mode", "chat_completions") != "chat_completions":
-            raise ValueError("Android supports Chat Completions only")
         kwargs = {"api_key": config["api_key"], "model_id": config.get("model_id", "")}
-        for key in ("base_url", "reasoning_effort"):
+        for key in ("base_url", "reasoning_effort", "api_mode"):
             if config.get(key):
                 kwargs[key] = config[key]
+        kwargs["timeout"] = float(config.get("timeout", 60))
         return OpenAIReasoner(OpenAIConfig(**kwargs))
     raise ValueError(f"Unsupported Android reasoner: {name}")
 

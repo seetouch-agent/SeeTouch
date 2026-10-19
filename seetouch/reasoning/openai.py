@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -15,6 +16,7 @@ from ..perception.screen import encode_image_data_url
 from .base import StepRecord
 from .parser import ParseError, parse_model_output
 from .prompts import build_history_summary, build_system_prompt, extract_summary_fields
+from .responses_transport import create_response
 
 
 logger = logging.getLogger(__name__)
@@ -35,17 +37,21 @@ class OpenAIConfig:
     def __post_init__(self) -> None:
         if not self.api_key.strip() or not self.model_id.strip():
             raise ValueError("OPENAI_API_KEY and OPENAI_MODEL_ID are required")
+        self.api_key = self.api_key.strip()
+        self.model_id = self.model_id.strip()
         self.base_url = self.base_url.strip().rstrip("/")
         parsed = urlsplit(self.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("OPENAI_BASE_URL must be an HTTP(S) API base URL")
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("OPENAI_BASE_URL must not contain credentials, query or fragment")
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError("OPENAI_BASE_URL has an invalid port")
         if self.base_url.endswith(("/chat/completions", "/responses")):
             raise ValueError("OPENAI_BASE_URL must exclude /chat/completions and /responses")
         if self.api_mode not in {"chat_completions", "responses"}:
             raise ValueError("OPENAI_API_MODE must be chat_completions or responses")
-        if self.timeout <= 0 or self.max_retries < 0:
+        if not math.isfinite(self.timeout) or self.timeout <= 0 or self.max_retries < 0:
             raise ValueError("OPENAI_TIMEOUT must be positive; OPENAI_MAX_RETRIES must be >= 0")
         if self.reasoning_effort is not None:
             self.reasoning_effort = self.reasoning_effort.strip().lower()
@@ -78,7 +84,11 @@ class OpenAIReasoner:
             timeout=self._config.timeout,
             max_retries=self._config.max_retries,
         )
-        if self._config.api_mode == "responses" and not hasattr(self._client, "responses"):
+        if (
+            self._config.api_mode == "responses"
+            and not callable(getattr(getattr(self._client, "responses", None), "create", None))
+            and not callable(getattr(self._client, "post", None))
+        ):
             self._client.close()
             raise RuntimeError("Responses requires openai>=1.66.0; upgrade the OpenAI SDK")
 
@@ -104,7 +114,8 @@ class OpenAIReasoner:
                 options = {}
                 if self._config.reasoning_effort is not None:
                     options["reasoning"] = {"effort": self._config.reasoning_effort}
-                response = self._client.responses.create(
+                response = create_response(
+                    self._client,
                     model=self._config.model_id,
                     input=[{"role": "user", "content": [
                         {"type": "input_text", "text": prompt},
@@ -129,8 +140,9 @@ class OpenAIReasoner:
                 message = response.choices[0].message
                 raw_output = message.content
                 reasoning = getattr(message, "reasoning_content", None)
-                if response.choices[0].finish_reason == "length":
-                    raise ValueError("Model output was truncated (finish_reason=length)")
+                finish_reason = response.choices[0].finish_reason
+                if finish_reason != "stop":
+                    raise ValueError(f"Model output did not complete (finish_reason={finish_reason})")
                 input_field, output_field = "prompt_tokens", "completion_tokens"
             if not isinstance(raw_output, str) or not raw_output.strip():
                 raise ValueError("Model returned no text; check refusal or output limits")

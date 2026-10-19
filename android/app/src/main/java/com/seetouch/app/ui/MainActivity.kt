@@ -47,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.seetouch.app.device.SeeTouchAccessibilityService
 import com.seetouch.app.settings.AppSettings
@@ -107,6 +109,13 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
                 .padding(padding)
                 .padding(16.dp),
         ) {
+            Text(
+                if (settings.modelId.isNotBlank()) "当前模型：${settings.modelId}"
+                else if (settings.reasoner == "doubao") "当前服务：豆包（默认模型）"
+                else "请先在设置中添加模型服务",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = instruction,
                 onValueChange = { instruction = it },
@@ -119,12 +128,10 @@ private fun TaskScreen(settings: AppSettings, onOpenSettings: () -> Unit) {
             Button(
                 onClick = {
                     warning = null
+                    val configError = settings.connectionError()
                     when {
                         instruction.isBlank() -> warning = "请输入任务指令"
-                        settings.apiKey.isBlank() ->
-                            warning = "请先在设置页填入所选后端的 API key"
-                        settings.reasoner == "openai" && settings.modelId.isBlank() ->
-                            warning = "请先在设置页填写模型 ID"
+                        configError != null -> warning = "请检查设置：$configError"
                         SeeTouchAccessibilityService.instance == null ->
                             warning = "请先开启 SeeTouch 无障碍服务（点下方按钮跳转）"
                         else -> {
@@ -271,6 +278,11 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
     var reasoningEffort by remember { mutableStateOf(settings.reasoningEffort) }
     var thinkingMode by remember { mutableStateOf(settings.thinkingMode) }
     var maxSteps by remember { mutableStateOf(settings.maxSteps.toString()) }
+    var apiMode by remember { mutableStateOf(settings.apiMode) }
+    var timeoutSeconds by remember { mutableStateOf(settings.timeoutSeconds.toString()) }
+    var showKey by remember(reasoner) { mutableStateOf(false) }
+    var showAdvanced by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<String?>(null) }
     var saved by remember { mutableStateOf(false) }
     val reasoningOptions = listOf(
         "" to "模型默认",
@@ -299,17 +311,20 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
-            Text("推理后端")
-            listOf("doubao" to "豆包", "openai" to "OpenAI 兼容接口").forEach { (value, label) ->
+            Text("模型服务", style = MaterialTheme.typography.titleMedium)
+            Text("填写服务商提供的地址、密钥和支持图片输入的模型。")
+            listOf("openai" to "OpenAI 兼容服务", "doubao" to "豆包专用配置").forEach { (value, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(
                         selected = reasoner == value,
                         onClick = {
+                            if (reasoner == value) return@RadioButton
                             reasoner = value
                             apiKey = settings.apiKeyFor(value)
                             baseUrl = settings.baseUrlFor(value)
                             modelId = settings.modelIdFor(value)
                             saved = false
+                            saveError = null
                         },
                     )
                     Text(label)
@@ -317,74 +332,116 @@ private fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
             }
             OutlinedTextField(
                 value = apiKey,
-                onValueChange = { apiKey = it; saved = false },
+                onValueChange = { apiKey = it; saved = false; saveError = null },
                 label = { Text("API Key") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
+                visualTransformation = if (showKey) VisualTransformation.None
+                    else PasswordVisualTransformation(),
+                trailingIcon = {
+                    TextButton(onClick = { showKey = !showKey }) {
+                        Text(if (showKey) "隐藏" else "显示")
+                    }
+                },
             )
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = baseUrl,
-                onValueChange = { baseUrl = it; saved = false },
+                onValueChange = { baseUrl = it; saved = false; saveError = null },
                 label = { Text("API Base URL") },
+                supportingText = { Text("例如 https://api.openai.com/v1，保留服务商要求的路径前缀") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
             Spacer(Modifier.height(12.dp))
+            if (reasoner == "openai") {
+                Text("接口协议")
+                listOf("chat_completions" to "Chat Completions", "responses" to "Responses")
+                    .forEach { (value, label) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = apiMode == value,
+                                onClick = { apiMode = value; saved = false; saveError = null },
+                            )
+                            Text(label)
+                        }
+                    }
+                Text("按服务商说明选择；程序不会在失败后自动切换协议。")
+            }
             OutlinedTextField(
                 value = modelId,
-                onValueChange = { modelId = it; saved = false },
+                onValueChange = { modelId = it; saved = false; saveError = null },
                 label = { Text(if (reasoner == "doubao") "模型 ID（留空用默认）" else "模型 ID") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = maxSteps,
-                onValueChange = { maxSteps = it.filter(Char::isDigit); saved = false },
-                label = { Text("最大步数") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            Spacer(Modifier.height(12.dp))
-            if (reasoner == "doubao") {
-                Text("豆包深度思考")
-                listOf("enabled" to "开启", "disabled" to "关闭", "auto" to "自动（需模型支持）")
-                    .forEach { (value, label) ->
+            TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                Text(if (showAdvanced) "收起高级设置" else "高级设置：思考强度、超时与步数")
+            }
+            if (showAdvanced) {
+                OutlinedTextField(
+                    value = maxSteps,
+                    onValueChange = { maxSteps = it.filter(Char::isDigit); saved = false; saveError = null },
+                    label = { Text("最大步数") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(12.dp))
+                if (reasoner == "doubao") {
+                    Text("豆包深度思考")
+                    listOf("enabled" to "开启", "disabled" to "关闭", "auto" to "自动（需模型支持）")
+                        .forEach { (value, label) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = thinkingMode == value,
+                                    onClick = { thinkingMode = value; saved = false; saveError = null },
+                                )
+                                Text(label)
+                            }
+                        }
+                } else {
+                    OutlinedTextField(
+                        value = timeoutSeconds,
+                        onValueChange = { timeoutSeconds = it.filter(Char::isDigit); saved = false; saveError = null },
+                        label = { Text("每次请求超时（秒）") },
+                        supportingText = { Text("5–600 秒；推理较慢的模型可适当增加") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text("思考强度（模型不支持时请选择“模型默认”）")
+                    reasoningOptions.forEach { (value, label) ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(
-                                selected = thinkingMode == value,
-                                onClick = { thinkingMode = value; saved = false },
+                                selected = reasoningEffort == value,
+                                onClick = { reasoningEffort = value; saved = false; saveError = null },
                             )
                             Text(label)
                         }
-                    }
-            } else {
-                Text("思考强度（模型不支持时请选择“模型默认”）")
-                reasoningOptions.forEach { (value, label) ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(
-                            selected = reasoningEffort == value,
-                            onClick = { reasoningEffort = value; saved = false },
-                        )
-                        Text(label)
                     }
                 }
             }
             Spacer(Modifier.height(12.dp))
             Button(
                 onClick = {
-                    settings.reasoner = reasoner
-                    settings.apiKey = apiKey
-                    settings.baseUrl = baseUrl
-                    settings.modelId = modelId
-                    settings.reasoningEffort = reasoningEffort
-                    settings.thinkingMode = thinkingMode
-                    settings.maxSteps = maxSteps.toIntOrNull()?.coerceIn(1, 200) ?: 45
-                    saved = true
+                    val timeout = if (reasoner == "openai") timeoutSeconds.toIntOrNull()
+                        else settings.timeoutSeconds
+                    val steps = maxSteps.toIntOrNull()
+                    saveError = AppSettings.validateConnection(
+                        reasoner, apiKey, baseUrl, modelId, apiMode, timeout ?: 0,
+                    ) ?: if (steps == null || steps !in 1..200) "最大步数应为 1–200" else null
+                    if (saveError == null && timeout != null && steps != null) {
+                        settings.saveConnection(
+                            reasoner, apiKey, baseUrl, modelId, apiMode, timeout,
+                            thinkingMode, reasoningEffort, steps,
+                        )
+                        saved = true
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("保存") }
+            saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (saved) {
                 Spacer(Modifier.height(8.dp))
                 Text("已保存", color = MaterialTheme.colorScheme.primary)

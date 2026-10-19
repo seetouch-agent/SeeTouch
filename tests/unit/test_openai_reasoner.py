@@ -54,7 +54,11 @@ def test_proxy_request_and_action():
     assert output.usage["total_tokens"] == 20
 
 
-@pytest.mark.parametrize("content,finish_reason", [(None, "stop"), ("{}", "length")])
+@pytest.mark.parametrize("content,finish_reason", [
+    (None, "stop"), ("{}", "length"),
+    ('{"action":"COMPLETE","parameters":{}}', "content_filter"),
+    ('{"action":"COMPLETE","parameters":{}}', "tool_calls"),
+])
 def test_invalid_response_fails(content, finish_reason):
     client = Mock()
     client.chat.completions.create.return_value = SimpleNamespace(choices=[SimpleNamespace(
@@ -152,6 +156,12 @@ def test_responses_incomplete_fails(status):
 def test_invalid_api_mode():
     with pytest.raises(ValueError, match="OPENAI_API_MODE"):
         OpenAIConfig("test", "vision", api_mode="unknown")
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+def test_invalid_timeout(timeout):
+    with pytest.raises(ValueError, match="TIMEOUT"):
+        OpenAIConfig("test", "vision", timeout=timeout)
 
 
 def test_responses_rejects_old_sdk_before_starting_task():
