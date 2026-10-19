@@ -25,7 +25,7 @@ metadata:
 1. **Gemini API 错误误记完成**：修复 Gemini 异常返回 COMPLETE 的路径；OpenAI/Doubao 已改为 VLMAPIError 中止，后续保留回归。
 2. **调试器访问和确认**：限制监听/来源、增加认证与真正的双向确认，避免自动批准敏感动作。
 3. **Android 隐私**：凭据保护、备份排除、限制诊断及索引导出入口；评估日志和截图保留方式。
-4. **交付与验收**：当前无 GitHub Release / APK 下载资产；完成 Android 真机回归后准备可复现的发布版本、安装包与演示材料。已按元数据声明补齐 [Apache-2.0 正文](../LICENSE)。
+4. **交付与验收**：已发布 [Android 1.4 Debug 安装包](https://github.com/seetouch-agent/SeeTouch/releases/tag/v1.4)，便于试用和评审；继续完成 Android 真机回归、正式发布签名与演示材料。已按元数据声明补齐 [Apache-2.0 正文](../LICENSE)。
 
 ## 下一轮工程工作
 

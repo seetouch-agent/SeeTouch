@@ -16,6 +16,18 @@ Android App 不依赖电脑执行任务，但仍需联网调用云端模型。�
 
 本说明对应 2026-10-19 的工作树，包含 Android OpenAI 兼容接口、连接测试、执行控制及追问/人工接管；运行验证范围见文末。
 
+## 下载与安装
+
+**[下载 Android APK（1.4）](https://github.com/seetouch-agent/SeeTouch/releases/download/v1.4/SeeTouch-1.4-debug.apk)** · [Release 说明](https://github.com/seetouch-agent/SeeTouch/releases/tag/v1.4) · [SHA-256 校验文件](https://github.com/seetouch-agent/SeeTouch/releases/download/v1.4/SHA256SUMS.txt)
+
+支持 Android 11 及以上，包含 arm64-v8a / x86_64，安装包约 69.3 MB。这是用于试用与评审的 Debug 签名安装包，与 Python 包版本独立。
+
+1. 在安卓设备下载 APK，按系统提示允许当前浏览器或文件管理器安装该应用。
+2. 安装后在系统设置中启用 SeeTouch 无障碍服务，并按需允许通知权限。
+3. 在 App 设置中填写支持图片输入的模型 API Key、Base URL 和模型 ID，选择对应协议，点击“测试连接”后开始任务。模型服务需要联网，调用费用以服务商规则为准。
+
+完整说明见 [Android 指南](android/README.md)；开发者也可从源码构建。
+
 ## 文档导航
 
 - [Android 构建与使用](android/README.md)：安装、模型设置、浮窗及任务结果。
@@ -23,8 +35,6 @@ Android App 不依赖电脑执行任务，但仍需联网调用云端模型。�
 - [OpenAI 兼容接口指南](docs/openai-compatible.md) / [Gemini 指南](docs/gemini-integration.md)：后端配置与验证范围。
 - [产品概览](memory/product_overview.md) / [技术决策](memory/technical_decisions.md) / [路线图](memory/future_roadmap.md)：当前能力、实现细节与待办。
 - [开发历程](memory/development_history.md)：保留旧版本演化，已替换的方案不作为当前功能说明。
-
-当前尚未发布 GitHub Release 或 APK 下载资产；Android 使用者需按构建指南生成并安装 APK。
 
 ## PC 快速开始
 
@@ -246,7 +256,9 @@ Android 英文路径构建副本与工作树源码哈希一致：`testDebugUnitT
 
 用户真机验证：CLI 通过 DeepSeek 的 OpenAI 兼容 Chat Completions 接口，在小米 Android 16 手机上执行“打开小红书”，最大步数设置为 3，人工确认应用成功打开。此记录未注明具体模型 ID 和实际执行步数；Responses 尚无真实服务成功验证记录。此 CLI 历史验证不能作为独立 App 回归结果。
 
-早期记录包含 Doubao + PC 路径的真机试跑，以及 Android 模拟器闭环；上述代码批次已构建 APK，未连接手机或调用真实模型服务。本次文档同步仅核对源码、文档和链接，未重跑模型、真机、测试 suite 或 APK 构建。历史结果见 [开发历程](memory/development_history.md)，不能作为当前 Gemini 或 Android 真机回归结论。
+早期记录包含 Doubao + PC 路径的真机试跑，以及 Android 模拟器闭环；上述代码批次已构建 APK，未连接手机或调用真实模型服务。此前文档同步仅核对源码、文档和链接，未重跑模型、真机、测试 suite 或 APK 构建。历史结果见 [开发历程](memory/development_history.md)，不能作为当前 Gemini 或 Android 真机回归结论。
+
+2026-10-19 APK 发布核验：从当前源码执行 `assembleDebug` 成功，重新检查包名、版本、最低 Android 版本、两个 ABI 及 APK v2 签名；47个打包 Python 模块与源码的编译结果一致。发布 APK 为 69,283,260 字节，SHA-256 为 `897693a177f436ad70c96ce349e9f934542ccbacc5849dc5a1e3d5ce615b23dc`。本次未重跑功能测试 suite、lint、真实模型或真机任务，以上既有测试记录与本次发布检查分开说明。
 
 贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)，近期工作见 [路线图](memory/future_roadmap.md)。问题反馈：[GitHub Issues](https://github.com/seetouch-agent/SeeTouch/issues)。
 

@@ -434,6 +434,12 @@ metadata:
 
 该代码基线随附两套 SDK 环境各201项 Python 测试、37项 Android JVM 测试、APK 1.4构建及 lint 记录，完整范围见 [主 README](../README.md#开发与验证)。本次仅同步文档与许可证，未新增真机、在线模型或性能验证。
 
+## GitHub APK 发布（2026-10-19）
+
+- [Android 1.4 / versionCode 5](https://github.com/seetouch-agent/SeeTouch/releases/tag/v1.4)：Debug 签名，Android 11+，arm64-v8a / x86_64。
+- 基于当前源码重新执行 `assembleDebug`，核对版本、签名、打包的47个 Python 模块；APK 为 69,283,260 字节，附 SHA-256 校验文件。
+- 本次未重跑功能测试 suite、lint、真实模型或真机任务；此前构建大小与测试记录保留原批次语境。
+
 ## 相关记忆
 
 - [technical_decisions.md](technical_decisions.md) — fuzzy 匹配移除详细原因、WAIT 协议设计

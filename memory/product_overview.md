@@ -44,8 +44,8 @@ Gemini 捕获 API 异常后仍返回 COMPLETE，可能误记 completed；OpenAI 
 
 ## 当前验证
 
-代码基线随附的 2026-10-19 验证记录：两套 SDK 环境各 201 项 Python 测试通过；Android JVM 37 项通过，APK 1.4 / versionCode 5 构建及 lint 通过。它们是既有记录，本次文档同步未重跑 suite、构建、真实模型或真机任务；详细范围见 [主 README](../README.md) 和 [Android 指南](../android/README.md)。
+代码基线随附的 2026-10-19 验证记录：两套 SDK 环境各 201 项 Python 测试通过；Android JVM 37 项通过，APK 1.4 / versionCode 5 构建及 lint 通过。它们是既有记录，此前文档同步未重跑 suite、构建、真实模型或真机任务；详细范围见 [主 README](../README.md) 和 [Android 指南](../android/README.md)。
 
 CLI 已有用户确认的 OpenAI 兼容 Chat Completions 真机打开应用记录；不能代替当前独立 App 回归。Responses 尚无真实服务成功验证，本轮 Android 真机验证未完成。早期试跑见 [开发历程](development_history.md)。
 
-当前没有 GitHub Release / APK 下载资产，需按 Android 指南自行构建。项目使用 [Apache-2.0](../LICENSE)。
+Android 1.4 安装包已通过 [GitHub Release](https://github.com/seetouch-agent/SeeTouch/releases/tag/v1.4) 提供；Debug 签名，Android 11+，包含 arm64-v8a / x86_64。发布批次重新构建并核验版本、签名和 Python 打包内容，未新增真机或在线模型验证，见 [Android 指南](../android/README.md)。项目使用 [Apache-2.0](../LICENSE)。

@@ -20,9 +20,17 @@ Kotlin/Compose 提供 UI、前台 Service、无障碍截图/手势和 `DeviceBri
 
 PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，另装 Pillow 和 python-dotenv；没有安装 Gemini SDK。新安装默认使用 OpenAI 兼容接口，支持 Chat Completions 和 Responses。旧 SDK 没有 Responses resource 时，使用其认证 HTTP transport 请求 `/responses`，保留 Base URL 路径、认证及超时；安卓任务禁用自动重试，避免暂停后重发旧截图；不需要升级 APK 的 SDK。已有豆包设置继续使用原后端。
 
-## 编译与安装
+## 下载与安装
 
-当前尚未发布 GitHub Release 或 APK 下载资产，以下为从源码构建与安装的方法。
+[下载 SeeTouch 1.4 APK](https://github.com/seetouch-agent/SeeTouch/releases/download/v1.4/SeeTouch-1.4-debug.apk) · [Release 说明](https://github.com/seetouch-agent/SeeTouch/releases/tag/v1.4) · [SHA-256 校验](https://github.com/seetouch-agent/SeeTouch/releases/download/v1.4/SHA256SUMS.txt)
+
+版本 1.4 / versionCode 5；Android 11+，arm64-v8a / x86_64，约 69.3 MB。此安装包使用 Debug 签名，供试用和评审安装。允许当前下载来源安装应用后，按下方“独立 App 使用”启用无障碍并配置自己的模型服务。覆盖安装需包名和签名相同；不同签名的既有安装不能直接覆盖。
+
+2026-10-19 发布核验：在当前源码执行 `assembleDebug` 成功；包名、版本、minSdk、ABI 与 APK v2 签名已复核，47个打包 Python 模块与当前源码编译结果一致。附件为 69,283,260 字节，SHA-256：`897693a177f436ad70c96ce349e9f934542ccbacc5849dc5a1e3d5ce615b23dc`。未在此发布批次重跑测试 suite、lint、真实模型或真机任务。
+
+## 从源码编译与安装
+
+以下为开发者从源码构建与安装的方法。
 
 使用 Android Studio 或配置好的 JDK/Android SDK，安装匹配的 SDK Platform（36.1）。`android/local.properties` 中的 `sdk.dir` 是本机配置，不提交。Java 源兼容性 11 不等于 Gradle 运行时 JDK 要求；可使用 Android Studio 配套 JDK，并以实际 Gradle 诊断为准。
 
