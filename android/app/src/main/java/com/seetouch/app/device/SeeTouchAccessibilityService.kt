@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.graphics.Path
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
@@ -13,6 +15,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.seetouch.app.overlay.TaskProgressOverlay
 import com.seetouch.app.overlay.FloatingTaskEntry
+import com.seetouch.app.overlay.OverlayOperationGate
 import com.seetouch.app.task.TaskController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +37,15 @@ import java.util.concurrent.TimeUnit
 class SeeTouchAccessibilityService : AccessibilityService() {
     private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var overlayJob: Job? = null
+    private var sensitiveScanJob: Job? = null
     @Volatile private var progressOverlay: TaskProgressOverlay? = null
     @Volatile private var floatingEntry: FloatingTaskEntry? = null
+    private val overlayHandler = Handler(Looper.getMainLooper())
+    private val overlayGate = OverlayOperationGate(
+        post = { overlayHandler.post(it) },
+        settle = { overlayHandler.postDelayed(it, 80) },
+        isUiThread = { Looper.myLooper() == Looper.getMainLooper() },
+    )
 
     @Volatile
     private var foregroundPackage: String? = null
@@ -44,6 +54,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         overlayJob?.cancel()
+        sensitiveScanJob?.cancel()
         progressOverlay?.close()
         floatingEntry?.close()
         val overlay = TaskProgressOverlay(this)
@@ -69,8 +80,17 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         if (windows.any { it.id == event.windowId &&
                 it.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }) return
         val pkg = event.packageName?.toString() ?: return
-        if (TaskController.state.value.status == com.seetouch.app.task.TaskStatus.RUNNING && pkg != packageName)
-            takeoverReason()?.let { TaskController.requestTakeover(it) }
+        val state = TaskController.state.value
+        if (state.status == com.seetouch.app.task.TaskStatus.RUNNING && pkg != packageName && sensitiveScanJob?.isActive != true) {
+            // Node reads can involve hundreds of remote calls. Never block overlay removal/callbacks on main.
+            val generation = state.taskGeneration
+            sensitiveScanJob = overlayScope.launch(Dispatchers.IO) {
+                val reason = runCatching { takeoverReason() }.getOrNull()
+                val current = TaskController.state.value
+                if (reason != null && current.taskGeneration == generation &&
+                    current.status == com.seetouch.app.task.TaskStatus.RUNNING) TaskController.requestTakeover(reason)
+            }
+        }
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         // 输入法窗口不代表前台 app 切换
         if (pkg.contains("inputmethod") || pkg.contains(".ime")) return
@@ -249,8 +269,15 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     private fun <T> withoutProgressOverlay(operation: () -> T): T {
         val overlay = progressOverlay
         val entry = floatingEntry
-        val take = { if (overlay == null) operation() else overlay.withoutOverlay(operation) }
-        return if (entry == null) take() else entry.withoutOverlay(take)
+        return overlayGate.run(hide = {
+            // Always begin suppression on both windows, even when one removal fails.
+            val progressHidden = overlay?.suppressForOperation() ?: true
+            val entryHidden = entry?.suppressForOperation() ?: true
+            check(progressHidden && entryHidden) { "Could not remove SeeTouch overlay windows" }
+        }, restore = {
+            overlay?.restoreAfterOperation()
+            entry?.restoreAfterOperation()
+        }, operation = operation)
     }
 
     fun refreshFloatingEntry() { floatingEntry?.render(TaskController.state.value) }

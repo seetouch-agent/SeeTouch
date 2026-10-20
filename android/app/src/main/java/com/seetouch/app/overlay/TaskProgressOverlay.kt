@@ -8,7 +8,6 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
-import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -26,8 +25,6 @@ import com.seetouch.app.task.*
 import com.seetouch.app.ui.MainActivity
 import com.seetouch.app.ui.MarkedScreenshotView
 import com.seetouch.app.ui.VoiceReplyActivity
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Bounded scrolling content; pause/stop and confirmation choices remain outside the scroller. */
@@ -182,6 +179,7 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
         dismiss.visibility = if (!display.active) View.VISIBLE else View.GONE
         resize()
         visibility.requested = true
+        if (!visibility.visible) { detach(); return }
         if (!added) {
             updatePosition()
             if (runCatching { wm.addView(root, params) }.isFailure) return
@@ -206,22 +204,15 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
         val height = minOf(bodyContent.measuredHeight, dp(320), (available - fixed).coerceAtLeast(dp(48)))
         if (body.layoutParams.height != height) body.layoutParams = LinearLayout.LayoutParams(-1, height)
     }
-    fun <T> withoutOverlay(operation: () -> T): T {
-        check(Looper.myLooper() != Looper.getMainLooper())
-        val ready = CountDownLatch(1)
-        handler.post {
-            val wasVisible = added && visibility.visible
-            visibility.beginOperation(); applyVisibility()
-            if (wasVisible) Choreographer.getInstance().postFrameCallback {
-                Choreographer.getInstance().postFrameCallback { ready.countDown() }
-            } else ready.countDown()
-        }
-        return try { check(ready.await(2, TimeUnit.SECONDS)); operation() }
-        finally { handler.post { visibility.endOperation(); applyVisibility() } }
+    fun suppressForOperation(): Boolean {
+        visibility.beginOperation()
+        return runCatching { if (added) { wm.removeViewImmediate(root); added = false } }.isSuccess
     }
+    fun restoreAfterOperation() { visibility.endOperation(); render(lastState) }
     fun onConfigurationChanged() { if (added) render(lastState) }
     fun close() { closed = true; handler.removeCallbacks(tick); handler.removeCallbacks(finishHide); hide() }
-    private fun hide() { visibility.requested = false; if (added) { runCatching { wm.removeViewImmediate(root) }; added = false } }
+    private fun detach() { if (added) { runCatching { wm.removeViewImmediate(root) }; added = false } }
+    private fun hide() { visibility.requested = false; detach() }
     private fun applyVisibility() { root.visibility = if (!closed && visibility.visible) View.VISIBLE else View.GONE }
     private fun openApp() {
         val intent = Intent(service, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

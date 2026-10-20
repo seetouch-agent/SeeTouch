@@ -2,7 +2,7 @@
 
 独立 Android GUI Agent App，同时保留供 PC 导出应用索引的 helper 入口。任务在手机上执行，模型推理调用云端 Doubao 或用户选择的 OpenAI 兼容服务，不是离线模型。
 
-核对日期：2026-10-20；当前工作树为 1.5，包含本地记忆与经验积累；下方下载入口为已发布的 1.4。
+核对日期：2026-10-20；当前工作树为 1.5.1，包含本地记忆与经验积累，以及截图前浮窗等待修复。
 
 ## 架构与构建配置
 
@@ -16,7 +16,7 @@ Kotlin/Compose 提供 UI、前台 Service、无障碍截图/手势和 `DeviceBri
 | AGP / Gradle wrapper | 9.2.1 / 9.4.1 |
 | Chaquopy / Python | 17.0.0 / 3.12 |
 | ABI | arm64-v8a、x86_64 |
-| App versionName / versionCode | 1.5 / 6；与 Python 包版本独立 |
+| App versionName / versionCode | 1.5.1 / 7；与 Python 包版本独立 |
 
 PC 与 APK 的依赖安装方式不同。APK 固定 `openai==1.30.0`、`pydantic==1.10.22`、`httpx==0.27.2`，另装 Pillow 和 python-dotenv；没有安装 Gemini SDK。新安装默认使用 OpenAI 兼容接口，支持 Chat Completions 和 Responses。旧 SDK 没有 Responses resource 时，使用其认证 HTTP transport 请求 `/responses`，保留 Base URL 路径、认证及超时；安卓任务禁用自动重试，避免暂停后重发旧截图；不需要升级 APK 的 SDK。已有豆包设置继续使用原后端。
 
@@ -44,6 +44,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下载依赖。APK 大小随构建配置变化。若 Windows 中文路径下的 JVM 测试报告 ClassNotFoundException，可将相同源码复制到英文路径后运行 `testDebugUnitTest assembleDebug lintDebug`，并核对源码哈希。
 
+1.5.1 本轮核对（2026-10-20）：用户堆栈中的首步失败位于浮窗移除等待，尚未调用系统截图。新增 2 项调度/超时回归，Android JVM 共 **39 passed**；两套 SDK 的 Python 全量测试各 **209 passed**。完整计时一轮（含构建、Lint）为 **234.69 秒**；随后将事件节点扫描移到后台后复测受影响的安卓部分，用时 **85.77 秒**。最终 APK 为 1.5.1 / versionCode 7，69,627,184 字节，双 ABI、ZIP 完整性及 v2 签名通过，签名与 1.5 一致，141 个构建输入文件哈希一致。Lint 0 errors / 39 warnings。本轮未连接手机，发生问题设备上的修复效果仍待覆盖安装后复验。
+
 1.5 本轮核对（2026-10-20）：Python 在两套 SDK 环境各 **209 passed**，JVM **37 passed**，APK 构建及 Lint 通过（0 errors / 39 warnings）。最终验证阶段分别为 Python Android SDK 29.65 秒、Python PC SDK 30.73 秒、安卓单测强制重跑 + APK + Lint 73.08 秒，合计 **133.46 秒**，低于 5 分钟预算。使用 `testDebugUnitTest --rerun` 只强制重跑测试，不重装全部构建依赖。APK 为 **1.5 / versionCode 6**、69,896,328 字节；139 个构建输入文件哈希一致，记忆 Python 模块及界面已打包，两个 ABI、ZIP 完整性和 v2 签名已核对，签名证书与上一版一致。尚无本轮真机或真实模型服务验证。
 
 代码基线 `ec78e8d` 随附的 2026-10-19 验证记录：英文路径中的构建副本与工作树代码/配置哈希一致，`testDebugUnitTest` 为 **37 passed**，`assembleDebug` 成功。1.4 / versionCode 5 的 Debug APK 为 69,616,864 字节，包含两个 ABI；结果处理等 Python 模块已打包，APK v2 签名验证通过。仓库 Python 测试在 `openai==1.30.0` 与 `1.66.0` 下各 **201 passed**；`lintDebug` 通过，0 errors / 39 warnings（版本、风格、无障碍提示和国际化建议）。未调用真实模型服务或进行真机回归。
@@ -70,7 +72,9 @@ macOS / Linux 对应命令为 `./gradlew assembleDebug`。首次构建需要下�
 
 Python Runner 的事件通过可选阶段回调送入 `TaskController` 的 StateFlow，App 和浮窗共用状态。步数上限是执行预算，不能当成已完成百分比，因此显示“第 N 步”和“最多 N 步”。进度回调异常不会改变执行结果。
 
-[Android 截图 API 文档](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#takeScreenshot(int,java.util.concurrent.Executor,android.accessibilityservice.AccessibilityService.TakeScreenshotCallback))说明，显示屏截图可能包含无障碍浮层。当前实现会在截图及点击/滑动前暂时隐藏浮窗，等待渲染帧后再执行，结束或异常后恢复显示；截图尺寸和坐标体系保持一致。相关状态及回调顺序有离线测试覆盖，浮窗显示、拖动和屏幕合成效果仍需安装 APK 后在设备上回归。
+[Android 截图 API 文档](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#takeScreenshot(int,java.util.concurrent.Executor,android.accessibilityservice.AccessibilityService.TakeScreenshotCallback))说明，显示屏截图可能包含无障碍浮层。1.5.1 在主线程一次移除悬浮球与进度窗，等待主线程定时回调 80 毫秒后再执行截图、手势或输入，结束或异常后恢复当前应显示的窗口。等待不再依赖应用的帧回调，避免原 `FloatingTaskEntry.withoutOverlay` 超时报 `Check failed`。主线程两秒仍不能完成移除时安全中止，迟到回调不会隐藏窗口或执行动作；新进度也不能在截图期间重新创建窗口。相关调度与异常恢复有离线回归，实际手机合成效果仍需安装 APK 后复验。
+
+1.5.1 同时将无障碍事件中的节点扫描移到后台，并合并并发扫描，避免主线程遍历远端节点拖延浮窗移除或截图回调。实际设备操作前仍执行敏感页面与任务控制版本检查。
 
 ## helper 应用索引
 

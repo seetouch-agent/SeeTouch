@@ -7,7 +7,6 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
-import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -28,8 +27,6 @@ import com.seetouch.app.task.TaskUiState
 import com.seetouch.app.ui.VoiceReplyActivity
 import com.seetouch.app.ui.MainActivity
 import org.json.JSONObject
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Idle entry point; a task launched here preserves the current application as its initial screen. */
@@ -104,6 +101,7 @@ class FloatingTaskEntry(private val service: AccessibilityService) {
             }
         }
         position(false)
+        if (!visibility.visible) { hide(); return }
         if (!added) { if (runCatching { wm.addView(root, params) }.isFailure) return; added = true }
         applyVisibility()
         root.doOnLayout { position(false) }
@@ -137,18 +135,12 @@ class FloatingTaskEntry(private val service: AccessibilityService) {
             starting = false; expanded = true; message.text = "任务未能启动，请回到应用重试"; render(lastState)
         } }, 250)
     }
-    fun <T> withoutOverlay(operation: () -> T): T {
-        val ready = CountDownLatch(1)
-        handler.post {
-            val wasVisible = added && visibility.visible
-            visibility.beginOperation(); applyVisibility()
-            if (wasVisible) Choreographer.getInstance().postFrameCallback {
-                Choreographer.getInstance().postFrameCallback { ready.countDown() }
-            } else ready.countDown()
-        }
-        return try { check(ready.await(2, TimeUnit.SECONDS)); operation() }
-        finally { handler.post { visibility.endOperation(); applyVisibility() } }
+    /** Called on main: remove the actual window, including its touch surface. */
+    fun suppressForOperation(): Boolean {
+        visibility.beginOperation()
+        return runCatching { if (added) { wm.removeViewImmediate(root); added = false } }.isSuccess
     }
+    fun restoreAfterOperation() { visibility.endOperation(); render(lastState) }
     fun close() { closed = true; hideKeyboard(); hide() }
     private fun hide() { if (added) { runCatching { wm.removeViewImmediate(root) }; added = false } }
     private fun applyVisibility() { root.visibility = if (!closed && visibility.visible) View.VISIBLE else View.GONE }
