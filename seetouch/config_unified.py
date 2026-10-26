@@ -68,7 +68,7 @@ class UnifiedConfig:
     """VLM 模型 ID"""
 
     thinking_mode: str
-    """Doubao thinking 模式: enabled|disabled|auto"""
+    """Doubao thinking 模式: enabled|disabled|auto（默认 disabled，省 token 降延迟）"""
 
     temperature: float | None
     """推理温度参数"""
@@ -104,7 +104,7 @@ class UnifiedConfig:
             max_steps=int(os.environ.get("SEETOUCH_MAX_STEPS", "45")),
             max_consecutive_failures=int(os.environ.get("SEETOUCH_MAX_CONSECUTIVE_FAILURES", "2")),
             max_consecutive_identical_actions=int(
-                os.environ.get("SEETOUCH_MAX_CONSECUTIVE_IDENTICAL_ACTIONS", "3")
+                os.environ.get("SEETOUCH_MAX_CONSECUTIVE_IDENTICAL_ACTIONS", "5")
             ),
             max_open_misses=int(os.environ.get("SEETOUCH_MAX_OPEN_MISSES", "3")),
             action_settle_seconds=float(os.environ.get("SEETOUCH_ACTION_SETTLE_SECONDS", "1.0")),
@@ -113,7 +113,7 @@ class UnifiedConfig:
             vlm_api_key=api_key,
             vlm_api_url=os.environ.get("DOUBAO_API_URL", "https://ark.cn-beijing.volces.com/api/v3"),
             vlm_model_id=os.environ.get("DOUBAO_MODEL_ID", "doubao-seed-1-6-vision-250815"),
-            thinking_mode=os.environ.get("SEETOUCH_THINKING_MODE", "enabled"),
+            thinking_mode=os.environ.get("SEETOUCH_THINKING_MODE", "disabled"),
             temperature=_parse_float_or_none(os.environ.get("SEETOUCH_TEMPERATURE")),
             top_p=_parse_float_or_none(os.environ.get("SEETOUCH_TOP_P")),
             history_window=int(os.environ.get("SEETOUCH_HISTORY_WINDOW", "8")),

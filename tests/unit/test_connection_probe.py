@@ -25,7 +25,7 @@ def test_probe_sends_fixed_synthetic_image_and_selected_protocol(probe, monkeypa
         seen.append(request)
         body = json.loads(request.content)
         assert probe.TEST_QUESTION in str(body)
-        assert "data:image/png;base64," in str(body)
+        assert "data:image/jpeg;base64," in str(body)  # 截图默认 JPEG
         if mode == "responses":
             assert request.url.path == "/v1/responses"
             return httpx.Response(200, json={"id": "resp", "status": "completed", "output": [

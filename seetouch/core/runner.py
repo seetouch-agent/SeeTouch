@@ -8,12 +8,13 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import time
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 from .control import ExecutionControl, ReobserveRequired, RunStopped
-from .outcome import api_failure_code
+from .outcome import RETRYABLE_API_ERRORS, api_failure_code
 
 from .event_bus import (
     EventBus,
@@ -24,6 +25,7 @@ from .event_bus import (
 )
 from ..core.action import (
     ACTION_CLICK,
+    ACTION_LONG_PRESS,
     ACTION_COMPLETE,
     ACTION_OPEN,
     ACTION_BACK,
@@ -40,6 +42,18 @@ from ..device.base import (
     DeviceError,
     OpenAppNeedsVisual,
     OpenAppNotFound,
+)
+from ..harness import (
+    DEFAULT_GROUNDING_RADIUS,
+    PinnedInputs,
+    LoopPolicy,
+    Observation,
+    ProgressLedger,
+    RunBudget,
+    StepEntry,
+    build_observation,
+    ground_action,
+    validate_action,
 )
 from ..perception.screen import downscale
 from ..reasoning.base import Reasoner
@@ -77,13 +91,20 @@ class Runner:
         guard: Guard | None = None,
         runs_dir: Path | str = "runs",
         max_consecutive_failures: int = 2,
-        max_consecutive_identical_actions: int = 3,
+        max_consecutive_identical_actions: int = 5,
         max_open_misses: int = 3,
         event_bus: EventBus | None = None,
         action_settle_seconds: float = 1.0,
         control: ExecutionControl | None = None,
         interaction: Callable[[dict], dict] | None = None,
         memory_store: MemoryStore | None = None,
+        task_timeout_seconds: float | None = None,
+        max_model_retries: int = 1,
+        model_retry_backoff_seconds: float = 2.0,
+        max_idle_steps: int = 8,
+        enable_click_grounding: bool = True,
+        click_grounding_radius: float = DEFAULT_GROUNDING_RADIUS,
+        max_tokens: int | None = None,
     ):
         self.device = device
         self.reasoner = reasoner
@@ -97,7 +118,29 @@ class Runner:
         self.control = control
         self.interaction = interaction
         self.memory_store = memory_store
+        if task_timeout_seconds is not None and task_timeout_seconds <= 0:
+            raise ValueError("task_timeout_seconds must be positive or None")
+        if max_model_retries < 0:
+            raise ValueError("max_model_retries must be >= 0")
+        if model_retry_backoff_seconds < 0:
+            raise ValueError("model_retry_backoff_seconds must be >= 0")
+        if max_tokens is not None and max_tokens <= 0:
+            raise ValueError("max_tokens must be positive or None")
+        self.task_timeout_seconds = task_timeout_seconds
+        self.max_model_retries = max_model_retries
+        self.model_retry_backoff_seconds = model_retry_backoff_seconds
+        self.max_idle_steps = max_idle_steps
+        self.enable_click_grounding = enable_click_grounding
+        self.click_grounding_radius = click_grounding_radius
         self._interaction_context: list[str] = []
+        self._pinned_inputs = PinnedInputs()
+
+        # harness 组件：观测 / 账本 / 预算 / 策略（见 seetouch.harness）
+        self._observation: Observation | None = None
+        self._ledger = ProgressLedger()
+        self._budget = RunBudget(max_steps=None, max_seconds=task_timeout_seconds, max_tokens=max_tokens)
+        self._policy = LoopPolicy(max_idle_steps=max_idle_steps)
+        self._last_hint_code: str | None = None
 
         # 运行状态(start() 初始化,step() 推进)
         self._session: Session | None = None
@@ -107,14 +150,30 @@ class Runner:
         self._pending_visual_request: str | None = None
         self._visual_baseline_app: str | None = None
         self._open_miss_count = 0
+        self._deadline: float | None = None
+        self._last_screen_signature: str | None = None
+        self._no_change_streak = 0
+        self._completion_rejections = 0
 
     # ======================== 公开 API ========================
 
     def start(self, task: Task) -> None:
         """初始化一次任务执行。后续通过 step() 逐步推进。"""
         self._task = task
-        self._session = Session(task, base_dir=self.runs_dir)
+        config = getattr(self.reasoner, "_config", None)
+        model_id = getattr(config, "model_id", None)
+        if not isinstance(model_id, str):
+            model_id = None
+        self._session = Session(
+            task,
+            base_dir=self.runs_dir,
+            metadata={
+                "reasoner": type(self.reasoner).__name__,
+                "model_id": model_id,
+            },
+        )
         self._interaction_context = []
+        self._pinned_inputs.clear()
         if self.control:
             self.control.event_sink = self._record_control_event
         self._current_step = 0
@@ -122,6 +181,17 @@ class Runner:
         self._pending_visual_request = None
         self._visual_baseline_app = None
         self._open_miss_count = 0
+        self._last_screen_signature = None
+        self._no_change_streak = 0
+        self._completion_rejections = 0
+        self._deadline = (
+            time.monotonic() + self.task_timeout_seconds
+            if self.task_timeout_seconds is not None else None
+        )
+        self._observation = None
+        self._ledger.reset()
+        self._budget.start()
+        self._last_hint_code = None
         if self.memory_store:
             try:
                 memories = self.memory_store.retrieve(task.instruction)
@@ -149,6 +219,8 @@ class Runner:
         if self._finished:
             raise RuntimeError("task already finished, call start() to begin a new task")
 
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            return self._timeout_result(self._current_step + 1)
         self._current_step += 1
         step = self._current_step
         attempt = 0
@@ -202,6 +274,10 @@ class Runner:
         self._checkpoint(revision)
         screenshot = downscale(screenshot)
         screenshot_path = session.save_screenshot(step, screenshot, attempt)
+        # 一帧观测：结构节点 + 签名。prompt、trace、点击校准共用这一份数据。
+        self._observation = self._build_observation(screenshot)
+        ui_context = self._observation.render() or self._read_ui_context()
+        unchanged = self._observe_screen_change(screenshot, ui_context)
 
         self._emit(STEP_SCREENSHOT_TAKEN, step=step, screenshot=screenshot)
 
@@ -216,9 +292,28 @@ class Runner:
                     instruction += memory_prompt(self.memory_store, session.used_memory_ids)
                 except (OSError, ValueError, KeyError, TypeError):
                     pass
-            if self._interaction_context:
-                instruction += "\n\n用户补充（以用户回答为准）：\n" + "\n".join(self._interaction_context)
-            out = self.reasoner.predict(instruction, screenshot, session.history)
+            if len(self._pinned_inputs):
+                # 用户明确给出的补充：不参与历史压缩，永远原样出现在指令里
+                instruction += "\n\n" + self._pinned_inputs.render()
+            remaining = max(0, task.max_steps - step + 1)
+            instruction += f"\n\n任务进度：已完成 {step - 1} 步，剩余最多 {remaining} 步。"
+            if ui_context:
+                instruction += (
+                    "\n\n系统提供的当前界面控件（坐标是 0-1000 归一化中心；"
+                    "点击优先使用对应控件的 center）：\n" + ui_context
+                )
+            hint = self._policy.evaluate(
+                step=step,
+                unchanged_streak=unchanged,
+                repeated_streak=self._ledger.repeated_streak(),
+            )
+            if hint is not None and hint.action in ("nudge", "escalate"):
+                self._last_hint_code = hint.code
+                hint_text = hint.text
+                if hint.code.startswith("unchanged") and session.history:
+                    hint_text += f"上一步是 {session.history[-1].action.type}。"
+                instruction += "\n\n" + hint_text
+            out = self._predict_with_retry(instruction, screenshot, session, step, revision)
         except VLMAPIError as exc:
             self._checkpoint(revision)
             from .action import ActionOutput
@@ -233,6 +328,8 @@ class Runner:
             session.record_step(
                 step, out, usage_already_counted=True, execution_success=False, notes=[reason],
                 screenshot_path=screenshot_path, reasoning_time=reasoning_time,
+                ui_context=ui_context,
+                screen_unchanged_streak=unchanged,
             )
             session.mark_aborted(reason)
             self._finished = True
@@ -245,7 +342,35 @@ class Runner:
                 terminal=True, terminal_reason=reason,
             )
         reasoning_time = time.perf_counter() - t0
+
+        # 落点校准：把"差一点点"的点击吸附到真实控件中心，并把诊断写进 trace。
+        pre_notes: list[str] = []
+        try:
+            grounding = ground_action(
+                out.action,
+                self._observation,
+                radius=self.click_grounding_radius,
+                enabled=self.enable_click_grounding,
+            )
+        except Exception as exc:  # 校准失败绝不能影响主流程
+            logger.warning("click grounding failed: %s", exc)
+            grounding = None
+        if grounding is not None:
+            if grounding.moved:
+                session.record_interaction({
+                    "type": "click_grounded", "step": step,
+                    "from": list(out.action.parameters.get("point") or []),
+                    "to": list(grounding.action.parameters.get("point") or []),
+                    "node": grounding.label,
+                })
+                out.action = grounding.action
+            if grounding.note:
+                pre_notes.append(grounding.note)
+        for problem in validate_action(out.action, self._observation):
+            pre_notes.append(f"action_diagnostic: {problem}")
+
         session.account_prediction(out.usage)
+        self._budget.consume_tokens(_usage_tokens(out.usage))
         session.record_interaction({"type": "model_decision", "step": step,
                                     "action": out.action.type, "parameters": out.action.parameters,
                                     "raw_output": out.raw_output, "screenshot": str(screenshot_path)})
@@ -256,6 +381,15 @@ class Runner:
                 "screenshot": str(screenshot_path), "executed": False,
             })
         self._checkpoint(revision)
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            session.record_step(
+                step, out, usage_already_counted=True, execution_success=None,
+                notes=["task_timeout_before_action"], screenshot_path=screenshot_path,
+                reasoning_time=reasoning_time,
+                ui_context=ui_context,
+                screen_unchanged_streak=unchanged,
+            )
+            return self._timeout_result(step, out, screenshot, screenshot_path)
         self._emit(
             STEP_REASONING_DONE,
             step=step,
@@ -288,16 +422,17 @@ class Runner:
             if out.action.type == ACTION_ASK_USER and reply.get("status") == "answered":
                 answer = str(reply.get("answer", "")).strip()
                 if answer:
-                    self._interaction_context.append(
-                        f"问题：{out.action.parameters['question']}\n回答：{answer}"
-                    )
+                    pinned = f"问题：{out.action.parameters['question']}\n回答：{answer}"
+                    self._interaction_context.append(pinned)
+                    self._pinned_inputs.add(pinned)
                     session.record_interaction({"type": "user_answer", "step": step,
                                                 "question": out.action.parameters["question"],
                                                 "answer": answer})
                     interaction_notes.append(f"问题：{out.action.parameters['question']}\n回答：{answer}")
             session.record_step(step, out, usage_already_counted=True, execution_success=None,
                                 screenshot_path=screenshot_path, reasoning_time=reasoning_time,
-                                notes=interaction_notes)
+                                notes=interaction_notes, ui_context=ui_context,
+                                screen_unchanged_streak=unchanged)
             if step >= task.max_steps:
                 session.mark_aborted("max_steps_reached")
                 self._finished = True
@@ -309,6 +444,50 @@ class Runner:
         # 3. COMPLETE 不需要 guard,也不执行任何设备动作
         if out.action.type in (ACTION_COMPLETE, ACTION_ANSWER):
             failed = out.action.parameters.get("status") == "failed"
+            if (
+                out.action.type == ACTION_COMPLETE
+                and not failed
+                and self._premature_completion(task, session)
+            ):
+                self._completion_rejections += 1
+                note = (
+                    "拒绝过早完成：该任务包含多个步骤，但还没有执行任何目标界面的"
+                    "点击/输入/滚动/返回操作。请继续完成剩余步骤。"
+                )
+                if self._completion_rejections >= 2:
+                    session.record_step(
+                        step, out, usage_already_counted=True, execution_success=False,
+                        notes=[note, "repeated_premature_completion"],
+                        screenshot_path=screenshot_path, reasoning_time=reasoning_time,
+                        ui_context=ui_context, screen_unchanged_streak=unchanged,
+                    )
+                    session.mark_aborted("premature_completion")
+                    self._finished = True
+                    return StepResult(
+                        step=step, screenshot=screenshot, screenshot_path=screenshot_path,
+                        prompt_text=out.prompt_text, raw_output=out.raw_output,
+                        reasoning_content=out.reasoning_content, action=out.action,
+                        screen_summary=out.screen_summary, action_summary=out.action_summary,
+                        execution_success=False, notes=[note], usage=out.usage,
+                        reasoning_time=reasoning_time, execution_time=0.0,
+                        terminal=True, terminal_reason="premature_completion",
+                    )
+                session.record_interaction({"type": "premature_completion", "step": step})
+                session.record_step(
+                    step, out, usage_already_counted=True, execution_success=None,
+                    notes=[note], screenshot_path=screenshot_path,
+                    reasoning_time=reasoning_time, ui_context=ui_context,
+                    screen_unchanged_streak=unchanged,
+                )
+                return StepResult(
+                    step=step, screenshot=screenshot, screenshot_path=screenshot_path,
+                    prompt_text=out.prompt_text, raw_output=out.raw_output,
+                    reasoning_content=out.reasoning_content, action=out.action,
+                    screen_summary=out.screen_summary,
+                    action_summary="拒绝过早完成，继续执行", execution_success=None,
+                    notes=[note], usage=out.usage, reasoning_time=reasoning_time,
+                    execution_time=0.0, terminal=False,
+                )
             terminal_reason = (out.action.parameters.get("reason") or "model_unable") if failed else "completed"
             if failed and terminal_reason not in ("model_unable", "app_not_installed", "blacklisted_app"):
                 terminal_reason = "model_unable"
@@ -316,6 +495,8 @@ class Runner:
                 step, out, usage_already_counted=True, execution_success=not failed,
                 screenshot_path=screenshot_path,
                 reasoning_time=reasoning_time, execution_time=0.0,
+                ui_context=ui_context,
+                screen_unchanged_streak=unchanged,
             )
             if failed:
                 session.mark_aborted(str(terminal_reason))
@@ -348,6 +529,8 @@ class Runner:
                     step, out, usage_already_counted=True, execution_success=None, notes=notes,
                     screenshot_path=screenshot_path,
                     reasoning_time=reasoning_time, execution_time=0.0,
+                    ui_context=ui_context,
+                    screen_unchanged_streak=unchanged,
                 )
                 session.mark_aborted("user_denied")
                 self._finished = True
@@ -363,7 +546,7 @@ class Runner:
                 )
 
         # 5. 执行
-        notes: list[str] = []
+        notes: list[str] = list(pre_notes)
         success: bool | None
         self._emit(STEP_EXECUTING, step=step, action=out.action)
         t1 = time.perf_counter()
@@ -425,11 +608,26 @@ class Runner:
                 self._visual_baseline_app = None
 
         # 7. 记录
+        if unchanged >= 2:
+            notes.append(f"界面已连续 {unchanged} 步未变化")
         session.record_step(
             step, out, usage_already_counted=True, execution_success=success, notes=notes,
             screenshot_path=screenshot_path,
             reasoning_time=reasoning_time, execution_time=execution_time,
+            ui_context=ui_context,
+            screen_unchanged_streak=unchanged,
         )
+        self._ledger.record(StepEntry(
+            step=step,
+            action=str(out.action.type),
+            parameters=dict(out.action.parameters),
+            summary=(out.action_summary or "")[:80],
+            outcome="ok" if success else "failed",
+            note="; ".join(notes)[:160],
+            screen_signature=(
+                self._observation.signature if self._observation else ""
+            ) or (self._last_screen_signature or ""),
+        ))
 
         # 8. 检查终止条件
         terminal = False
@@ -456,6 +654,21 @@ class Runner:
             session.mark_aborted("max_steps_reached")
             terminal = True
             terminal_reason = "max_steps_reached"
+
+        # 策略层兜底：空转 / 预算耗尽这类"不是失败但也不该继续"的情况
+        if not terminal:
+            hint = self._policy.evaluate(
+                step=step,
+                unchanged_streak=unchanged,
+                repeated_streak=self._ledger.repeated_streak(),
+                budget_reason=self._budget.exhausted(step),
+            )
+            if hint is not None and hint.action == "abort":
+                self._last_hint_code = hint.code
+                notes.append(hint.text)
+                session.mark_aborted(hint.terminal_reason or hint.code)
+                terminal = True
+                terminal_reason = hint.terminal_reason or hint.code
 
         if terminal:
             self._finished = True
@@ -495,11 +708,76 @@ class Runner:
     def current_step(self) -> int:
         return self._current_step
 
+    @property
+    def ledger(self) -> ProgressLedger:
+        """本次任务的进度账本（调试器 / 评测脚本读取）。"""
+        return self._ledger
+
+    @property
+    def budget(self) -> RunBudget:
+        """本次任务的预算账本。"""
+        return self._budget
+
+    @property
+    def pinned_inputs(self) -> PinnedInputs:
+        """用户明确给出的补充（永不压缩）。"""
+        return self._pinned_inputs
+
+    @property
+    def observation(self) -> Observation | None:
+        """最近一帧观测（调试用）。"""
+        return self._observation
+
     # ======================== 内部 ========================
 
     def _record_control_event(self, event: dict) -> None:
         assert self._session is not None
         self._session.record_interaction({"step": self._current_step, **event})
+
+    def _predict_with_retry(self, instruction, screenshot, session, step, revision):
+        attempts = self.max_model_retries + 1
+        for attempt in range(attempts):
+            try:
+                return self.reasoner.predict(instruction, screenshot, session.history)
+            except VLMAPIError as exc:
+                code = api_failure_code(exc)
+                if code not in RETRYABLE_API_ERRORS or attempt + 1 >= attempts:
+                    raise
+                delay = self.model_retry_backoff_seconds * (2 ** attempt)
+                session.record_interaction({
+                    "type": "model_retry", "step": step, "attempt": attempt + 1,
+                    "error_code": code, "delay_seconds": delay,
+                })
+                logger.warning(
+                    "transient model error (%s), retrying in %.1fs (%d/%d)",
+                    code, delay, attempt + 1, self.max_model_retries,
+                )
+                self._sleep(delay)
+                self._checkpoint(revision)
+
+    def _timeout_result(self, step, out=None, screenshot=None, screenshot_path=None) -> StepResult:
+        from PIL import Image
+        from .action import ActionOutput
+
+        assert self._session is not None
+        if out is None:
+            out = ActionOutput(
+                action=Action(type=ACTION_WAIT), raw_output="",
+                action_summary="任务超时",
+            )
+        if screenshot is None:
+            screenshot = Image.new("RGB", (1, 1))
+        self._session.mark_aborted("task_timeout")
+        self._finished = True
+        self._session.record_interaction({"type": "task_timeout", "step": step})
+        return StepResult(
+            step=step, screenshot=screenshot, screenshot_path=screenshot_path,
+            prompt_text="", raw_output="", reasoning_content="",
+            action=out.action, screen_summary="", action_summary="任务超时",
+            execution_success=None, notes=["task_timeout"], usage=None,
+            reasoning_time=0.0, execution_time=0.0,
+            terminal=True, terminal_reason="task_timeout",
+        )
 
     def _checkpoint(self, revision: int | None = None) -> int | None:
         current = self.control.checkpoint(revision) if self.control else None
@@ -576,10 +854,81 @@ class Runner:
             logger.warning("device.current_app() failed: %s", exc)
             return None
 
+    def _read_ui_context(self) -> str:
+        read = getattr(self.device, "ui_context", None)
+        if not callable(read):
+            return ""
+        try:
+            value = read()
+            return value if isinstance(value, str) else ""
+        except Exception as exc:
+            logger.warning("ui_context failed: %s", exc)
+            return ""
+
+    def _device_screen_size(self, screenshot) -> tuple[int, int]:
+        """设备真实分辨率（节点 bounds 用的是像素，必须按它归一化）。"""
+        try:
+            size = self.device.screen_size()
+            width, height = int(size[0]), int(size[1])
+            if width > 0 and height > 0:
+                return (width, height)
+        except Exception:
+            pass
+        try:
+            return (int(screenshot.size[0]), int(screenshot.size[1]))
+        except Exception:
+            return (0, 0)
+
+    def _build_observation(self, screenshot) -> Observation:
+        """取这一帧的结构化观测；设备不支持时返回空观测（纯视觉链路照常工作）。"""
+        screen = self._device_screen_size(screenshot)
+        read = getattr(self.device, "ui_elements", None)
+        if callable(read):
+            try:
+                elements = read()
+            except Exception as exc:
+                logger.warning("ui_elements failed: %s", exc)
+                elements = None
+            if isinstance(elements, list) and elements:
+                try:
+                    return build_observation(
+                        elements=elements, screen_size=screen,
+                    )
+                except Exception as exc:
+                    logger.warning("observation build failed: %s", exc)
+        return Observation(screen_size=screen)
+
+    def _premature_completion(self, task, session) -> bool:
+        if not _instruction_is_multi_step(task.instruction):
+            return False
+        meaningful = {"CLICK", "LONG_PRESS", "TYPE", "SCROLL", "BACK"}
+        return not any(record.action.type in meaningful for record in session.history)
+
+    def _observe_screen_change(self, screenshot, ui_context: str) -> int:
+        # 有结构节点时用结构签名（忽略焦点等瞬时抖动），否则退回文本/像素摘要
+        signature = self._observation.signature if self._observation else ""
+        if not signature:
+            if ui_context:
+                payload = ui_context.encode("utf-8")
+            else:
+                width, height = screenshot.size
+                body = screenshot.convert("L").crop((0, int(height * 0.1), width, height))
+                payload = body.resize((32, 32)).tobytes()
+            signature = hashlib.sha1(payload).hexdigest()
+        if signature == self._last_screen_signature:
+            self._no_change_streak += 1
+        else:
+            self._no_change_streak = 1
+            self._last_screen_signature = signature
+        return self._no_change_streak
+
     def _execute(self, action: Action) -> None:
         if action.type == ACTION_CLICK:
             x, y = action.parameters["point"]
             self.device.click(int(x), int(y))
+        elif action.type == ACTION_LONG_PRESS:
+            x, y = action.parameters["point"]
+            self.device.long_press(int(x), int(y))
         elif action.type == ACTION_TYPE:
             self.device.type_text(action.parameters["text"])
         elif action.type == ACTION_SCROLL:
@@ -603,3 +952,21 @@ class Runner:
 
 class InteractionUnavailable(Exception):
     """A noninteractive host must stop safely rather than guess or claim completion."""
+
+
+def _usage_tokens(usage: dict[str, Any] | None) -> int:
+    """从 usage 字典里取本步 token 总数（缺失字段按 0 计）。"""
+    if not usage:
+        return 0
+    try:
+        return int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _instruction_is_multi_step(instruction: str) -> bool:
+    text = instruction or ""
+    markers = ("然后", "再", "并", "进入", "开启", "关闭", "返回", "找到")
+    return any(marker in text for marker in markers) or sum(
+        text.count(verb) for verb in ("打开", "点击", "输入", "开启", "关闭")
+    ) >= 2

@@ -27,7 +27,7 @@ Android 采用 Kotlin/Compose + Chaquopy 17.0.0 / Python 3.12，minSdk 30。构�
 
 - `Runner.start/step/run`：截图、预测、Guard、动作执行和 Session 记录；EventBus 用于调试器进度与日志。
 - `DeviceController` 与 `Reasoner` Protocol：设备层和模型层解耦。
-- 10 类动作：CLICK、TYPE、SCROLL、OPEN、BACK、WAIT、COMPLETE、ASK_USER、TAKE_OVER、ANSWER。坐标 0–1000；截图宽度最多 720，保持比例。
+- 11 类动作：CLICK、LONG_PRESS、TYPE、SCROLL、OPEN、BACK、WAIT、COMPLETE、ASK_USER、TAKE_OVER、ANSWER。坐标 0–1000；截图宽度最多 720，保持比例。
 - OPEN 使用设备显示名索引、候选反馈和视觉兜底；静态包名表已退出路径。
 - 默认连续 2 次执行失败、3 次完全相同动作或达到步数上限时中止。成功设备动作后默认等待 1 秒，WAIT 不额外等待；终止与交互动作走各自处理分支。
 - 记录截图、trace、交互事件和 summary；CLI/调试器保存在 runs，Android 保存在应用内部文件目录。

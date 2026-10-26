@@ -51,7 +51,7 @@ PC 索引由 helper 导出并同步；Android 通过 DeviceBridge.launchableApps
 
 ## 动作、图像与等待
 
-动作枚举为 CLICK/TYPE/SCROLL/OPEN/BACK/WAIT/COMPLETE/ASK_USER/TAKE_OVER/ANSWER。设备操作由设备层执行，追问和接管交给 interaction 回调，ANSWER/COMPLETE 由 Runner 结束任务。增加动作时需核对 action、Runner、parser、prompt、相关入口及针对性测试；只有设备动作才需要扩展设备 Protocol 和实现。
+动作枚举为 CLICK/LONG_PRESS/TYPE/SCROLL/OPEN/BACK/WAIT/COMPLETE/ASK_USER/TAKE_OVER/ANSWER。设备操作由设备层执行，追问和接管交给 interaction 回调，ANSWER/COMPLETE 由 Runner 结束任务。增加动作时需核对 action、Runner、parser、prompt、相关入口及针对性测试；只有设备动作才需要扩展设备 Protocol 和实现。
 
 坐标为 0–1000；设备层使用真实屏幕尺寸换算。`perception/screen.py` 负责缩放和编码，不存在单独的 image.py。Runner 在源头缩至最大宽度 720，上传和截图记录共用这一图像；Doubao/OpenAI 编码为 PNG data URL，Gemini 将 PIL Image 交给 SDK。
 

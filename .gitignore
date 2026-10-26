@@ -17,6 +17,7 @@ tmp1.md
 # Local credentials, device inventories and signing material
 .env.*
 !.env.example
+!.env.e2e.example
 api-key.txt
 applist.json
 applist.json.*

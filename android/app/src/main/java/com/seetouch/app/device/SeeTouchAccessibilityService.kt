@@ -110,6 +110,53 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     fun currentPackage(): String? =
         foregroundPackage ?: rootInActiveWindow?.packageName?.toString()
 
+    /** Compact active-window tree for model grounding (text/desc/id/bounds/flags). */
+    fun uiNodes(limit: Int = 120): Array<String> {
+        val root = rootInActiveWindow ?: return emptyArray()
+        val out = mutableListOf<String>()
+        val seen = HashSet<String>()
+        var visited = 0
+        fun clean(value: CharSequence?): String =
+            (value?.toString() ?: "").replace('\t', ' ').replace('\n', ' ')
+                .replace('"', '\'').trim().take(80)
+        fun walk(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 30 || visited >= 400 || out.size >= limit) return
+            visited++
+            val pkg = node.packageName?.toString() ?: ""
+            if (pkg != "com.android.systemui" && pkg != packageName && node.isVisibleToUser) {
+                val text = clean(node.text)
+                val desc = clean(node.contentDescription)
+                val id = node.viewIdResourceName?.substringAfterLast('/') ?: ""
+                val clickable = node.isClickable
+                val scrollable = node.isScrollable
+                val editable = node.isEditable
+                if (text.isNotEmpty() || desc.isNotEmpty() || clickable || scrollable || editable) {
+                    val rect = android.graphics.Rect()
+                    node.getBoundsInScreen(rect)
+                    if (rect.width() > 0 && rect.height() > 0) {
+                        val flags = buildList {
+                            if (clickable) add("click")
+                            if (scrollable) add("scroll")
+                            if (editable) add("edit")
+                            if (node.isFocused) add("focus")
+                        }.joinToString(",").ifEmpty { "-" }
+                        val line = listOf(
+                            text, desc, id, node.className?.toString()?.substringAfterLast('.') ?: "",
+                            rect.left, rect.top, rect.right, rect.bottom, flags,
+                        ).joinToString("\t")
+                        if (seen.add(line)) out.add(line)
+                    }
+                }
+            }
+            for (i in 0 until node.childCount) {
+                if (out.size >= limit || visited >= 400) break
+                walk(node.getChild(i), depth + 1)
+            }
+        }
+        walk(root, 0)
+        return out.toTypedArray()
+    }
+
     fun takeoverReason(): String? {
         val root = rootInActiveWindow ?: return null
         if (root.packageName?.toString() == packageName) return null
@@ -182,6 +229,16 @@ class SeeTouchAccessibilityService : AccessibilityService() {
         return dispatchGestureBlocking(
             GestureDescription.Builder()
                 .addStroke(GestureDescription.StrokeDescription(path, 0, TAP_DURATION_MS))
+                .build()
+        )
+    }
+
+    /** 长按:在原地保持按压 LONG_PRESS_DURATION_MS,触发系统长按。 */
+    fun longPress(x: Float, y: Float): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatchGestureBlocking(
+            GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0, LONG_PRESS_DURATION_MS))
                 .build()
         )
     }
@@ -287,6 +344,7 @@ class SeeTouchAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "SeeTouchA11y"
         private const val TAP_DURATION_MS = 80L
+        private const val LONG_PRESS_DURATION_MS = 800L
         private const val SCREENSHOT_TIMEOUT_S = 5L
         private const val GESTURE_TIMEOUT_S = 5L
 

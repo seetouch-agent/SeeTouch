@@ -79,9 +79,32 @@ def downscale(image: Image.Image, max_width: int = WORK_MAX_WIDTH) -> Image.Imag
     return image.resize(new_size, Image.LANCZOS)
 
 
-def encode_image_data_url(image: Image.Image, image_format: str = "PNG") -> str:
-    """把 PIL Image 编码成 data URL,供多模态 chat API 使用。"""
+# 截图默认用 JPEG：手机截图是不透明图像，PNG 的体积约为 JPEG 的 3-5 倍，
+# 而每步都要上传一次。需要无损时显式传 image_format="PNG"。
+DEFAULT_IMAGE_FORMAT = "JPEG"
+DEFAULT_JPEG_QUALITY = 85
+
+
+def encode_image_data_url(
+    image: Image.Image,
+    image_format: str = DEFAULT_IMAGE_FORMAT,
+    *,
+    quality: int = DEFAULT_JPEG_QUALITY,
+) -> str:
+    """把 PIL Image 编码成 data URL,供多模态 chat API 使用。
+
+    JPEG 路径会先转成 RGB（截图带 alpha 时 JPEG 无法保存），并用 ``quality`` 压一次；
+    PNG 路径保持无损。
+    """
+    fmt = (image_format or DEFAULT_IMAGE_FORMAT).upper()
     buf = io.BytesIO()
-    image.save(buf, format=image_format)
+    if fmt in ("JPEG", "JPG"):
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image.save(buf, format="JPEG", quality=int(quality), optimize=True)
+        mime = "jpeg"
+    else:
+        image.save(buf, format=fmt)
+        mime = fmt.lower()
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f"data:image/{image_format.lower()};base64,{b64}"
+    return f"data:image/{mime};base64,{b64}"

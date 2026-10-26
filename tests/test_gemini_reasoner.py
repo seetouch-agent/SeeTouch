@@ -1,10 +1,13 @@
 """GeminiReasoner 单元测试。"""
 
-import os
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
+from PIL import Image
 
-from seetouch.reasoning.gemini import GeminiConfig
+from seetouch.core.exceptions import VLMAPIError
+from seetouch.reasoning.gemini import GeminiConfig, GeminiReasoner
 
 
 def test_config_from_env_success(monkeypatch):
@@ -40,7 +43,7 @@ def test_config_default_model():
     """测试默认模型配置。"""
     config = GeminiConfig(api_key="test-key")
     assert config.model_id == "gemini-3.1-flash-lite"
-    assert config.history_window == 8
+    assert config.history_window == 0  # 改为按 64k 预算压缩，不再固定保留 8 步
 
 
 def test_config_custom_params():
@@ -58,3 +61,29 @@ def test_config_custom_params():
     assert config.top_p == 0.9
     assert config.max_tokens == 1024
     assert config.history_window == 5
+
+
+def test_api_failure_raises_instead_of_reporting_complete():
+    model = Mock()
+    model.generate_content.side_effect = RuntimeError("upstream unavailable")
+    with patch("google.generativeai.configure"), patch(
+        "google.generativeai.GenerativeModel", return_value=model
+    ):
+        reasoner = GeminiReasoner(GeminiConfig(api_key="test-key"))
+    with pytest.raises(VLMAPIError, match="upstream unavailable"):
+        reasoner.predict("打开设置", Image.new("RGB", (100, 200)), [])
+
+
+def test_valid_response_still_parses_action():
+    model = Mock()
+    model.generate_content.return_value = SimpleNamespace(
+        text='{"action":"COMPLETE","parameters":{}}',
+        resolve=Mock(),
+        usage_metadata=None,
+    )
+    with patch("google.generativeai.configure"), patch(
+        "google.generativeai.GenerativeModel", return_value=model
+    ):
+        reasoner = GeminiReasoner(GeminiConfig(api_key="test-key"))
+    output = reasoner.predict("打开设置", Image.new("RGB", (100, 200)), [])
+    assert output.action.type == "COMPLETE"

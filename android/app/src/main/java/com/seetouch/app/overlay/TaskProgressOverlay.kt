@@ -271,7 +271,7 @@ class TaskProgressOverlay(private val service: AccessibilityService) {
     }
     private fun dp(value: Int) = (value * service.resources.displayMetrics.density).toInt()
     private fun actionLabel(action: String) = when (action) {
-        "CLICK" -> "点击"; "TYPE" -> "输入文字"; "SCROLL" -> "滑动"; "OPEN" -> "打开应用"
+        "CLICK" -> "点击"; "LONG_PRESS" -> "长按"; "TYPE" -> "输入文字"; "SCROLL" -> "滑动"; "OPEN" -> "打开应用"
         "BACK" -> "返回"; "WAIT" -> "等待"; "ASK_USER" -> "追问"; "TAKE_OVER" -> "人工接管"
         "ANSWER" -> "给出答案"; "COMPLETE" -> "结束"; else -> "操作"
     }

@@ -7,6 +7,7 @@ import pytest
 from seetouch.core.action import (
     ACTION_CLICK,
     ACTION_COMPLETE,
+    ACTION_LONG_PRESS,
     ACTION_OPEN,
     ACTION_BACK,
     ACTION_SCROLL,
@@ -107,6 +108,28 @@ def test_parse_simple_text_format():
     raw = "Action: CLICK: [[500, 600]]"
     action = parse_model_output(raw, SCREEN)
     assert action.type == ACTION_CLICK
+    assert action.parameters == {"point": [500, 600]}
+
+
+def test_parse_long_press():
+    raw = '{"action":"LONG_PRESS","parameters":{"point":[500,820]}}'
+    action = parse_model_output(raw, SCREEN)
+    assert action.type == ACTION_LONG_PRESS
+    assert action.parameters == {"point": [500, 820]}
+
+
+def test_parse_long_press_accepts_common_aliases():
+    for name in ("LONG_CLICK", "LONGPRESS", "longclick"):
+        raw = f'{{"action":"{name}","parameters":{{"point":[100,200]}}}}'
+        action = parse_model_output(raw, SCREEN)
+        assert action.type == ACTION_LONG_PRESS
+        assert action.parameters == {"point": [100, 200]}
+
+
+def test_parse_long_press_simple_text_format():
+    raw = "Action: LONG_PRESS: [[500, 600]]"
+    action = parse_model_output(raw, SCREEN)
+    assert action.type == ACTION_LONG_PRESS
     assert action.parameters == {"point": [500, 600]}
 
 

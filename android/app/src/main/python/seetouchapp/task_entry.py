@@ -184,6 +184,11 @@ def _run_task(instruction, config: dict, step_callback, confirm_callback, progre
         event_bus=_progress_bus(progress_callback) if progress_callback is not None else None,
         control=control, interaction=interact,
         memory_store=MemoryStore(os.path.join(str(DeviceBridge.filesDir()), "agent_memory.json")),
+        task_timeout_seconds=(
+            float(config["task_timeout_seconds"])
+            if float(config.get("task_timeout_seconds") or 0) > 0 else None
+        ),
+        max_model_retries=int(config.get("max_model_retries", 1)),
     )
 
     task = Task(instruction=instruction, max_steps=max_steps,

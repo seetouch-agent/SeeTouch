@@ -18,6 +18,7 @@ from typing import Tuple
 from PIL import Image
 
 from ..base import DeviceError
+from ...harness import nodes_from_rows, render_nodes
 from ...perception.screen import norm_to_pixel
 from ..android.app_index import AppIndexEntry
 from ..android.app_launcher import AppLauncher
@@ -85,6 +86,12 @@ class NativeAndroidController:
         if not self._b.click(x, y):
             raise DeviceError(f"click({x},{y}) gesture dispatch failed")
 
+    def long_press(self, x_norm: int, y_norm: int) -> None:
+        x, y = norm_to_pixel(x_norm, y_norm, self.screen_size())
+        logger.debug("long_press norm=(%s,%s) px=(%s,%s)", x_norm, y_norm, x, y)
+        if not self._b.longClick(x, y):
+            raise DeviceError(f"long_press({x},{y}) gesture dispatch failed")
+
     def type_text(self, text: str) -> None:
         if not text:
             return
@@ -125,6 +132,40 @@ class NativeAndroidController:
 
     def learn_app_from_visual(self, request: str, package: str) -> None:
         self._launcher.learn_from_visual(request, package)
+
+    def ui_elements(self, limit: int = 120) -> list[dict]:
+        """结构化控件列表（供 harness 做落点校准与界面签名）。"""
+        try:
+            rows = [str(row) for row in self._b.uiNodes()]
+        except Exception as exc:
+            logger.warning("uiNodes failed: %s", exc)
+            return []
+        width, height = self.screen_size()
+        nodes = nodes_from_rows(rows, screen=(width, height))
+        return [
+            {
+                "text": node.text,
+                "desc": node.desc,
+                "resource": node.resource,
+                "class": node.cls,
+                "bounds": node.bounds,
+                "clickable": node.clickable,
+                "scrollable": node.scrollable,
+                "editable": node.editable,
+                "focused": node.focused,
+            }
+            for node in nodes[:limit]
+        ]
+
+    def ui_context(self, limit: int = 90, max_chars: int = 6000) -> str:
+        width, height = self.screen_size()
+        try:
+            rows = [str(row) for row in self._b.uiNodes()]
+        except Exception as exc:
+            logger.warning("uiNodes failed: %s", exc)
+            return ""
+        nodes = nodes_from_rows(rows, screen=(width, height))[:limit]
+        return render_nodes(nodes, (width, height), limit=limit, max_chars=max_chars)
 
     # ------------------------- 内部 helpers -------------------------
 

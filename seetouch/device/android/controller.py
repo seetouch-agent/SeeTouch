@@ -12,12 +12,16 @@ from typing import Tuple
 from PIL import Image
 
 from ..base import DeviceError
+from ...harness import nodes_from_elements, nodes_from_xml, render_nodes
 from ...perception.screen import norm_to_pixel
 from .app_index import AppListJsonSource
 from .app_launcher import AppLauncher
 
 
 logger = logging.getLogger(__name__)
+
+# Android 系统默认长按阈值约 500ms,留出余量;与 on-device 端保持一致。
+LONG_PRESS_DURATION_S = 0.8
 
 
 class AndroidController:
@@ -83,6 +87,11 @@ class AndroidController:
         logger.debug("click norm=(%s,%s) px=(%s,%s)", x_norm, y_norm, x, y)
         self._d.click(x, y)
 
+    def long_press(self, x_norm: int, y_norm: int) -> None:
+        x, y = norm_to_pixel(x_norm, y_norm, self.screen_size())
+        logger.debug("long_press norm=(%s,%s) px=(%s,%s)", x_norm, y_norm, x, y)
+        self._d.long_click(x, y, duration=LONG_PRESS_DURATION_S)
+
     def type_text(self, text: str) -> None:
         # u2 在焦点输入框上 set_text 原生支持中文(走 atx-agent 调 UiAutomator)
         if not text:
@@ -131,6 +140,42 @@ class AndroidController:
         """转给 AppLauncher 写入 learned cache。"""
         self._launcher.learn_from_visual(request, package)
 
+    def ui_elements(self, limit: int = 120) -> list[dict]:
+        """结构化控件列表（供 harness 做落点校准与界面签名）。
+
+        与 ``ui_context`` 的区别：这里返回原始字段，渲染与截断交给调用方，
+        这样同一帧数据可以被 prompt、trace 和点击校准复用，不必重复 dump。
+        """
+        try:
+            xml_text = self._d.dump_hierarchy(compressed=True)
+        except Exception as exc:
+            logger.warning("dump_hierarchy failed: %s", exc)
+            return []
+        width, height = self.screen_size()
+        nodes = nodes_from_xml(xml_text, screen=(width, height), limit=limit)
+        return [
+            {
+                "text": node.text,
+                "desc": node.desc,
+                "resource": node.resource,
+                "class": node.cls,
+                "bounds": node.bounds,
+                "clickable": node.clickable,
+                "scrollable": node.scrollable,
+                "editable": node.editable,
+                "focused": node.focused,
+                "package": node.package,
+            }
+            for node in nodes
+        ]
+
+    def ui_context(self, limit: int = 90, max_chars: int = 6000) -> str:
+        """Compact accessibility tree for model grounding (PC uiautomator2 path)."""
+        width, height = self.screen_size()
+        elements = self.ui_elements(limit=max(limit, 1))
+        nodes = nodes_from_elements(elements, screen=(width, height), limit=limit)
+        return render_nodes(nodes, (width, height), limit=limit, max_chars=max_chars)
+
     # ------------------------- 内部 helpers -------------------------
 
     def _safe_app_list(self) -> list[str]:
@@ -139,3 +184,8 @@ class AndroidController:
         except Exception as exc:
             logger.warning("app_list failed: %s", exc)
             return []
+
+
+def _clean(value: str | None, limit: int = 80) -> str:
+    text = " ".join((value or "").split()).replace('"', "'")
+    return text[:limit]

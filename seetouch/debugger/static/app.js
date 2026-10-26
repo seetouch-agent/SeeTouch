@@ -425,22 +425,32 @@ function renderScreenshot(data) {
 function drawActionOverlay(ctx, data, canvasW, canvasH) {
     const params = data.action_params;
 
-    if (data.action_type === "CLICK" && params.point) {
+    if ((data.action_type === "CLICK" || data.action_type === "LONG_PRESS") && params.point) {
         const [nx, ny] = params.point;
         const px = (nx / 1000) * canvasW;
         const py = (ny / 1000) * canvasH;
+        // 长按用琥珀色区分,点击用红色
+        const hue = data.action_type === "LONG_PRESS" ? "251, 191, 36" : "248, 113, 113";
 
-        // 外圈脉冲
+        // 外圈脉冲(长按多一圈,示意按压持续)
         ctx.beginPath();
         ctx.arc(px, py, 18, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(248, 113, 113, 0.6)";
+        ctx.strokeStyle = "rgba(" + hue + ", 0.6)";
         ctx.lineWidth = 2;
         ctx.stroke();
+        if (data.action_type === "LONG_PRESS") {
+            ctx.beginPath();
+            ctx.arc(px, py, 26, 0, Math.PI * 2);
+            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = "rgba(" + hue + ", 0.45)";
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
 
         // 内圈实心
         ctx.beginPath();
         ctx.arc(px, py, 8, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(248, 113, 113, 0.9)";
+        ctx.fillStyle = "rgba(" + hue + ", 0.9)";
         ctx.fill();
 
         // 十字准星

@@ -36,6 +36,9 @@ Android 1.5 新增[本地记忆与经验积累](docs/memory-and-learning.md)：�
 
 ## 文档导航
 
+- [架构对照](ARCHITECTURE_COMPARISON.md) / [改造记录](MIGRATION_LOG.md)：与 nanoMuse 的逐模块对照、许可证边界和每项修改的证据。
+- [Agent 优化轮次](AGENT_OPTIMIZATION_ROUNDS.md)：以复杂多步任务驱动的 6 轮改造、参考源码和前后对比。
+- [端到端测试指南](E2E_TEST_GUIDE.md) / [端到端测试报告](E2E_TEST_REPORT.md)：模拟器、真实模型、独立设备状态判定及 PC/APK 两条路径结果。
 - [Android 构建与使用](android/README.md)：安装、模型设置、浮窗及任务结果。
 - [Android 交互说明](docs/android-interactions.md)：连接测试、暂停/继续、追问、接管、确认与回放。
 - [OpenAI 兼容接口指南](docs/openai-compatible.md) / [Gemini 指南](docs/gemini-integration.md)：后端配置与验证范围。
@@ -224,6 +227,7 @@ tests/              # 当前维护的 Python 测试入口
 | 动作 | 参数 | 含义 |
 |---|---|---|
 | `CLICK` | `{"point": [x, y]}` | 点击 |
+| `LONG_PRESS` | `{"point": [x, y]}` | 长按（约 800 ms），用于上下文菜单/应用信息等 |
 | `TYPE` | `{"text": "..."}` | 输入文本 |
 | `SCROLL` | `{"start_point": [x, y], "end_point": [x, y]}` | 滑动 |
 | `OPEN` | `{"app_name": "设置"}` | 按本机显示名启动应用 |

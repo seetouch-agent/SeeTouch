@@ -13,10 +13,12 @@ from typing import Any
 
 from PIL import Image
 
-from ..core.action import ACTION_COMPLETE, ACTION_WAIT, Action, ActionOutput
+from ..core.action import ACTION_WAIT, Action, ActionOutput
+from ..core.exceptions import VLMAPIError
 from .base import StepRecord
 from .parser import ParseError, parse_model_output
-from .prompts import build_history_summary, build_system_prompt, extract_summary_fields
+from ..harness.context import bind_budget, compact_history, estimate_tokens
+from .prompts import build_user_block, extract_summary_fields, static_system_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -40,7 +42,8 @@ class GeminiConfig:
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
-    history_window: int = 8
+    history_window: int = 0
+    context_tokens: int = 64000
 
     @classmethod
     def from_env(cls) -> "GeminiConfig":
@@ -112,14 +115,21 @@ class GeminiReasoner:
     ) -> ActionOutput:
         """预测下一步动作。"""
         # 构建 prompt
-        history_text = build_history_summary(history, n_recent=self._config.history_window)
-        system_prompt = build_system_prompt(instruction, history_text)
-        prompt_text = f"{system_prompt}\n\n[截图]"
+        # 前缀缓存：静态规则放最前，任务/历史放后面，Gemini 的隐式缓存按前缀命中
+        system_text = static_system_prompt()
+        budget = bind_budget(max_tokens=getattr(self._config, "context_tokens", 64000))
+        history_text = compact_history(
+            history,
+            budget=budget,
+            fixed_tokens=estimate_tokens(system_text) + estimate_tokens(instruction),
+        ).text
+        system_prompt = build_user_block(instruction, history_text)
+        prompt_text = f"{system_text}\n\n{system_prompt}\n\n[截图]"
 
         try:
             # 调用 Gemini API
             # Gemini API 直接接受 PIL Image 对象
-            response = self._model.generate_content([system_prompt, screenshot])
+            response = self._model.generate_content([system_text, system_prompt, screenshot])
 
             # 阻塞等待生成完成
             response.resolve()
@@ -129,13 +139,7 @@ class GeminiReasoner:
 
         except Exception as exc:
             logger.error("gemini api call failed: %s", exc)
-            return ActionOutput(
-                action=Action(type=ACTION_COMPLETE, parameters={}),
-                raw_output=f"Error: {type(exc).__name__}: {exc}",
-                screen_summary="",
-                action_summary="API 调用失败,任务终止",
-                prompt_text=prompt_text,
-            )
+            raise VLMAPIError(f"{type(exc).__name__}: {exc}") from exc
 
         # 提取 summary 字段
         summary = extract_summary_fields(raw_output)
@@ -152,6 +156,7 @@ class GeminiReasoner:
                 action_summary="模型输出无法解析,降级为等待后重试",
                 usage=usage,
                 prompt_text=prompt_text,
+                parse_error=True,
             )
 
         return ActionOutput(

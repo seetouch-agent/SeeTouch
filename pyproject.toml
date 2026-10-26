@@ -24,6 +24,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov",
     "ruff",
+    "httpx>=0.27",
 ]
 ui = [
     "rich>=13.0",

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -101,6 +102,25 @@ def _cmd_run(args: argparse.Namespace, settings: AppSettings) -> int:
         guard=Guard(),
         runs_dir=runs_dir,
         memory_store=None if args.no_memory else MemoryStore(Path.home() / ".seetouch" / "agent_memory.json"),
+        max_consecutive_failures=int(os.environ.get("SEETOUCH_MAX_CONSECUTIVE_FAILURES", "2")),
+        max_consecutive_identical_actions=int(
+            os.environ.get("SEETOUCH_MAX_CONSECUTIVE_IDENTICAL_ACTIONS", "5")
+        ),
+        max_open_misses=int(os.environ.get("SEETOUCH_MAX_OPEN_MISSES", "3")),
+        action_settle_seconds=float(os.environ.get("SEETOUCH_ACTION_SETTLE_SECONDS", "1.0")),
+        task_timeout_seconds=(
+            float(os.environ["SEETOUCH_TASK_TIMEOUT"])
+            if float(os.environ.get("SEETOUCH_TASK_TIMEOUT", "0")) > 0 else None
+        ),
+        max_model_retries=int(os.environ.get("SEETOUCH_MAX_MODEL_RETRIES", "1")),
+        # harness 升级项（见 docs/harness-design.md）
+        max_idle_steps=int(os.environ.get("SEETOUCH_MAX_IDLE_STEPS", "8")),
+        enable_click_grounding=os.environ.get("SEETOUCH_CLICK_GROUNDING", "1") not in ("0", "false", "no"),
+        click_grounding_radius=float(os.environ.get("SEETOUCH_CLICK_GROUNDING_RADIUS", "60")),
+        max_tokens=(
+            int(os.environ["SEETOUCH_MAX_TOKENS"])
+            if int(os.environ.get("SEETOUCH_MAX_TOKENS", "0")) > 0 else None
+        ),
     )
 
     task = Task(instruction=args.instruction, max_steps=max_steps)

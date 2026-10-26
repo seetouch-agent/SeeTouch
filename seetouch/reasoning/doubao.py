@@ -17,7 +17,8 @@ from ..core.exceptions import VLMAPIError
 from ..perception.screen import encode_image_data_url
 from .base import StepRecord
 from .parser import ParseError, parse_model_output
-from .prompts import build_history_summary, build_system_prompt, extract_summary_fields
+from ..harness.context import bind_budget, compact_history, estimate_tokens
+from .prompts import build_user_block, extract_summary_fields, static_system_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ DEFAULT_MODEL_ID = "doubao-seed-1-6-vision-250815"
 #   "enabled"  - 总是思考,慢、贵,但准确率高
 # 注意:doubao-seed-1-6-vision-250815 不支持 "auto",其他模型可能支持
 THINKING_MODES = {"disabled", "enabled", "auto"}
-DEFAULT_THINKING_MODE = "enabled"
+DEFAULT_THINKING_MODE = "disabled"  # 默认不思考：更快更省
 
 
 @dataclass
@@ -42,7 +43,8 @@ class DoubaoConfig:
     temperature: float | None = None
     top_p: float | None = None
     thinking_mode: str = DEFAULT_THINKING_MODE
-    history_window: int = 8
+    history_window: int = 0
+    context_tokens: int = 64000
     timeout: float = 60.0
     max_retries: int = 2
 
@@ -115,6 +117,7 @@ class DoubaoReasoner:
                 usage=usage,
                 prompt_text=prompt_text,
                 reasoning_content=reasoning_content,
+                parse_error=True,
             )
 
         return ActionOutput(
@@ -135,18 +138,25 @@ class DoubaoReasoner:
         screenshot: Image.Image,
         history: list[StepRecord],
     ) -> list[dict[str, Any]]:
-        history_text = build_history_summary(history, n_recent=self._config.history_window)
-        system_prompt = build_system_prompt(instruction, history_text)
-
+        # 前缀缓存：system 段每步逐字节相同，任务/历史/观测全部放在 user 段
+        system_text = static_system_prompt()
+        budget = bind_budget(max_tokens=getattr(self._config, "context_tokens", 64000))
+        history_text = compact_history(
+            history,
+            budget=budget,
+            fixed_tokens=estimate_tokens(system_text) + estimate_tokens(instruction),
+        ).text
+        user_text = build_user_block(instruction, history_text)
         return [
-            {"role": "user", "content": system_prompt},
+            {"role": "system", "content": system_text},
             {
                 "role": "user",
                 "content": [
+                    {"type": "text", "text": user_text},
                     {
                         "type": "image_url",
                         "image_url": {"url": encode_image_data_url(screenshot)},
-                    }
+                    },
                 ],
             },
         ]
@@ -229,4 +239,3 @@ class DoubaoReasoner:
                         elif item.get("type") == "image_url":
                             parts.append("[截图]")
         return "\n".join(parts)
-

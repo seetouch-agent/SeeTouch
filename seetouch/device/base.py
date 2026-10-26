@@ -38,6 +38,10 @@ class DeviceController(Protocol):
         """单击。坐标范围 [0, 1000]。"""
         ...
 
+    def long_press(self, x_norm: int, y_norm: int) -> None:
+        """长按。坐标范围 [0, 1000]。用于唤出上下文菜单/进入应用信息等。"""
+        ...
+
     def type_text(self, text: str) -> None:
         """在当前焦点输入框输入文本(支持中文)。"""
         ...

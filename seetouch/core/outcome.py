@@ -9,11 +9,17 @@ def failure_code(reason: str | None) -> str | None:
     text = reason.lower()
     if text.startswith("reasoning_failed: "):
         category = text.split(": ", 2)[1]
-        if category in ("quota", "permission_missing", "timeout", "model_error"):
+        if category in (
+            "quota", "permission_missing", "rate_limit", "server_error",
+            "network_error", "timeout", "model_error",
+        ):
             return category
     groups = (
         ("quota", ("quota", "balance", "billing", "insufficient_credit", "overdue")),
         ("permission_missing", ("permission", "accessibility", "unauthorized", "401", "403")),
+        ("rate_limit", ("rate_limit", "429", "too many requests")),
+        ("server_error", ("server_error", "502", "503", "504")),
+        ("network_error", ("connection", "network", "dns", "unavailable")),
         ("timeout", ("timeout", "timed out")),
         ("max_steps", ("max_steps",)),
         ("stuck_loop", ("stuck_loop", "dead_loop")),
@@ -41,7 +47,17 @@ def api_failure_code(error: Exception) -> str:
             return "quota"
         if status in (401, 403):
             return "permission_missing"
+        if status == 429:
+            return "rate_limit"
+        if isinstance(status, int) and 500 <= status <= 599:
+            return "server_error"
         if isinstance(current, TimeoutError) or "timeout" in type(current).__name__.lower():
             return "timeout"
+        name = type(current).__name__.lower()
+        if "connection" in name or "network" in name:
+            return "network_error"
         current = current.__cause__ or current.__context__
     return "model_error"
+
+
+RETRYABLE_API_ERRORS = frozenset({"rate_limit", "server_error", "network_error", "timeout"})

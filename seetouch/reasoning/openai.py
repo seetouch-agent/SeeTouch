@@ -6,6 +6,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlsplit
 
 from PIL import Image
@@ -15,7 +16,8 @@ from ..core.exceptions import VLMAPIError
 from ..perception.screen import encode_image_data_url
 from .base import StepRecord
 from .parser import ParseError, parse_model_output
-from .prompts import build_history_summary, build_system_prompt, extract_summary_fields
+from ..harness.context import bind_budget, compact_history, estimate_tokens
+from .prompts import build_user_block, extract_summary_fields, static_system_prompt
 from .responses_transport import create_response
 
 
@@ -30,7 +32,8 @@ class OpenAIConfig:
     base_url: str = "https://api.openai.com/v1"
     timeout: float = 60.0
     max_retries: int = 1
-    history_window: int = 8
+    history_window: int = 0
+    context_tokens: int = 64000
     api_mode: str = "chat_completions"
     reasoning_effort: str | None = None
 
@@ -70,6 +73,7 @@ class OpenAIConfig:
             max_retries=int(os.environ.get("OPENAI_MAX_RETRIES", "1")),
             api_mode=os.environ.get("OPENAI_API_MODE", "chat_completions"),
             reasoning_effort=os.environ.get("OPENAI_REASONING_EFFORT"),
+            context_tokens=int(os.environ.get("SEETOUCH_CONTEXT_TOKENS", "64000")),
         )
 
 
@@ -95,15 +99,25 @@ class OpenAIReasoner:
     def predict(
         self, instruction: str, screenshot: Image.Image, history: list[StepRecord]
     ) -> ActionOutput:
-        history_text = build_history_summary(history, n_recent=self._config.history_window)
-        prompt = build_system_prompt(instruction, history_text)
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": encode_image_data_url(screenshot)}},
-            ],
-        }]
+        # 前缀缓存：system 段每一步逐字节相同，动态内容全部放在 user 段
+        system_text = static_system_prompt()
+        budget = bind_budget(max_tokens=self._config.context_tokens)
+        history_text = compact_history(
+            history,
+            budget=budget,
+            fixed_tokens=estimate_tokens(system_text) + estimate_tokens(instruction),
+        ).text
+        prompt = build_user_block(instruction, history_text)
+        messages = [
+            {"role": "system", "content": system_text},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": encode_image_data_url(screenshot)}},
+                ],
+            },
+        ]
         logger.info(
             "[API call] provider=openai model=%s protocol=%s",
             self._config.model_id, self._config.api_mode,
@@ -117,10 +131,15 @@ class OpenAIReasoner:
                 response = create_response(
                     self._client,
                     model=self._config.model_id,
-                    input=[{"role": "user", "content": [
-                        {"type": "input_text", "text": prompt},
-                        {"type": "input_image", "image_url": encode_image_data_url(screenshot)},
-                    ]}],
+                    input=[
+                        {"role": "system", "content": [
+                            {"type": "input_text", "text": system_text},
+                        ]},
+                        {"role": "user", "content": [
+                            {"type": "input_text", "text": prompt},
+                            {"type": "input_image", "image_url": encode_image_data_url(screenshot)},
+                        ]},
+                    ],
                     store=False,
                     **options,
                 )
@@ -152,23 +171,38 @@ class OpenAIReasoner:
                     "input_tokens": getattr(response.usage, input_field, 0) or 0,
                     "output_tokens": getattr(response.usage, output_field, 0) or 0,
                     "total_tokens": response.usage.total_tokens or 0,
+                    "cached_tokens": _cached_tokens(response.usage),
                 }
         except Exception as exc:
             raise VLMAPIError(str(exc)) from exc
 
         summary = extract_summary_fields(raw_output)
+        parse_error = False
         try:
             action = parse_model_output(raw_output, screenshot.size)
         except ParseError:
             logger.warning("OpenAI model output could not be parsed; waiting before retry")
             action = Action(type=ACTION_WAIT, parameters={})
             summary["action_summary"] = "模型输出无法解析，等待后重试"
+            parse_error = True
         return ActionOutput(
             action=action,
             raw_output=raw_output,
             screen_summary=summary.get("screen_summary", ""),
             action_summary=summary.get("action_summary", ""),
             usage=usage,
-            prompt_text=f"{prompt}\n\n[截图]",
+            prompt_text=f"{system_text}\n\n{prompt}\n\n[截图]",
             reasoning_content=reasoning if isinstance(reasoning, str) else "",
+            parse_error=parse_error,
         )
+
+
+def _cached_tokens(usage: Any) -> int:
+    """读取 provider 报回来的前缀缓存命中量（不同协议字段名不同）。"""
+    for attr in ("prompt_tokens_details", "input_tokens_details"):
+        details = getattr(usage, attr, None)
+        if details is not None:
+            value = getattr(details, "cached_tokens", 0)
+            if isinstance(value, int) and value > 0:
+                return value
+    return 0

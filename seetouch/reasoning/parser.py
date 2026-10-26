@@ -12,6 +12,7 @@ from typing import Any, Tuple
 
 from ..core.action import (
     ACTION_CLICK,
+    ACTION_LONG_PRESS,
     ACTION_COMPLETE,
     ACTION_OPEN,
     ACTION_BACK,
@@ -25,6 +26,14 @@ from ..core.action import (
     Action,
 )
 from ..core.exceptions import ParseError
+
+
+# 模型偶尔会把长按写成这些变体;宽容解析统一归一到标准动作名。
+_ACTION_ALIASES = {
+    "LONGPRESS": ACTION_LONG_PRESS,
+    "LONG_CLICK": ACTION_LONG_PRESS,
+    "LONGCLICK": ACTION_LONG_PRESS,
+}
 
 
 def parse_model_output(raw_text: str, image_size: Tuple[int, int]) -> Action:
@@ -74,6 +83,7 @@ def _normalize_parsed_action(
         return None
 
     action_type = str(raw_action).strip().upper()
+    action_type = _ACTION_ALIASES.get(action_type, action_type)
     if action_type not in VALID_ACTIONS:
         return None
 
@@ -85,7 +95,7 @@ def _normalize_parsed_action(
     if not isinstance(params, dict):
         params = {"value": params}
 
-    if action_type == ACTION_CLICK:
+    if action_type in (ACTION_CLICK, ACTION_LONG_PRESS):
         point = (
             params.get("point")
             or params.get("coordinate")
@@ -97,7 +107,7 @@ def _normalize_parsed_action(
         if point is None and ("x" in params or "y" in params):
             point = _point_from_xy(params.get("x"), params.get("y"))
         norm = _normalize_point(point, image_size)
-        return Action(type=ACTION_CLICK, parameters={"point": norm}) if norm else None
+        return Action(type=action_type, parameters={"point": norm}) if norm else None
 
     if action_type == ACTION_TYPE:
         text = params.get("text")
@@ -164,7 +174,7 @@ def _normalize_parsed_action(
 
 def _parse_simple_action(text: str, image_size: Tuple[int, int]) -> Action | None:
     match = re.search(
-        r"\b(CLICK|TYPE|OPEN|SCROLL|BACK|WAIT|COMPLETE)\b\s*[:：]\s*(.*)",
+        r"\b(LONG_PRESS|LONG_CLICK|LONGPRESS|CLICK|TYPE|OPEN|SCROLL|BACK|WAIT|COMPLETE)\b\s*[:：]\s*(.*)",
         text,
         re.IGNORECASE | re.DOTALL,
     )
@@ -172,17 +182,18 @@ def _parse_simple_action(text: str, image_size: Tuple[int, int]) -> Action | Non
         return None
 
     action_type = match.group(1).upper()
+    action_type = _ACTION_ALIASES.get(action_type, action_type)
     payload_text = match.group(2).strip()
     payload = _try_parse_json(payload_text)
     if payload is None:
         payload = payload_text
 
-    if action_type == ACTION_CLICK:
+    if action_type in (ACTION_CLICK, ACTION_LONG_PRESS):
         point = payload[0] if isinstance(payload, list) and payload else payload
         if isinstance(point, list) and point and isinstance(point[0], list):
             point = point[0]
         norm = _normalize_point(point, image_size)
-        return Action(type=ACTION_CLICK, parameters={"point": norm}) if norm else None
+        return Action(type=action_type, parameters={"point": norm}) if norm else None
 
     if action_type == ACTION_TYPE:
         text_value = payload[0] if isinstance(payload, list) and payload else payload

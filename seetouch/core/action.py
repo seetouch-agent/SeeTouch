@@ -9,10 +9,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-ActionType = Literal["CLICK", "TYPE", "SCROLL", "OPEN", "BACK", "WAIT", "COMPLETE", "ASK_USER", "TAKE_OVER", "ANSWER"]
+ActionType = Literal["CLICK", "LONG_PRESS", "TYPE", "SCROLL", "OPEN", "BACK", "WAIT", "COMPLETE", "ASK_USER", "TAKE_OVER", "ANSWER"]
 
 
 ACTION_CLICK: ActionType = "CLICK"
+ACTION_LONG_PRESS: ActionType = "LONG_PRESS"
 ACTION_TYPE: ActionType = "TYPE"
 ACTION_SCROLL: ActionType = "SCROLL"
 ACTION_OPEN: ActionType = "OPEN"
@@ -24,8 +25,8 @@ ACTION_TAKE_OVER: ActionType = "TAKE_OVER"
 ACTION_ANSWER: ActionType = "ANSWER"
 
 VALID_ACTIONS: frozenset[str] = frozenset(
-    {ACTION_CLICK, ACTION_TYPE, ACTION_SCROLL, ACTION_OPEN, ACTION_BACK, ACTION_WAIT,
-     ACTION_COMPLETE, ACTION_ASK_USER, ACTION_TAKE_OVER, ACTION_ANSWER}
+    {ACTION_CLICK, ACTION_LONG_PRESS, ACTION_TYPE, ACTION_SCROLL, ACTION_OPEN, ACTION_BACK,
+     ACTION_WAIT, ACTION_COMPLETE, ACTION_ASK_USER, ACTION_TAKE_OVER, ACTION_ANSWER}
 )
 
 
@@ -35,6 +36,7 @@ class Action:
 
     parameters 形状(归一化坐标 0-1000):
         CLICK:    {"point": [x, y]}
+        LONG_PRESS: {"point": [x, y]}     # 长按,用于唤出上下文菜单/应用信息等
         TYPE:     {"text": "..."}
         SCROLL:   {"start_point": [x, y], "end_point": [x, y]}
         OPEN:     {"app_name": "..."}    # 中文名 或 Android package
@@ -50,10 +52,12 @@ class Action:
         if self.type not in VALID_ACTIONS:
             raise ValueError(f"Invalid action type: {self.type!r}")
 
-        if self.type == ACTION_CLICK:
+        if self.type in (ACTION_CLICK, ACTION_LONG_PRESS):
             point = self.parameters.get("point")
             if not (isinstance(point, (list, tuple)) and len(point) == 2):
-                raise ValueError(f"CLICK requires parameters.point [x,y], got {point!r}")
+                raise ValueError(
+                    f"{self.type} requires parameters.point [x,y], got {point!r}"
+                )
         elif self.type == ACTION_TYPE:
             if not isinstance(self.parameters.get("text"), str):
                 raise ValueError("TYPE requires parameters.text (str)")
@@ -117,4 +121,4 @@ class ActionOutput:
     usage: dict[str, Any] | None = None
     prompt_text: str = ""
     reasoning_content: str = ""
-
+    parse_error: bool = False

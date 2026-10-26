@@ -12,6 +12,7 @@ from typing import Any
 from PIL import Image
 
 from ..core.action import Action, ActionOutput
+from ..harness.ledger import same_action
 from ..reasoning.base import StepRecord
 from .task import Task
 from .outcome import failure_code
@@ -64,6 +65,13 @@ class RunResult:
     learned_memory_id: str | None = None
     learning_status: str = "disabled"
     memory_suggestions: list[dict] = field(default_factory=list)
+    reasoner: str | None = None
+    model_id: str | None = None
+    terminal_reason: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
+    total_tokens: int = 0
+    total_cached_tokens: int = 0
 
 
 class Session:
@@ -78,8 +86,9 @@ class Session:
             summary.json       # 任务总结(任务完成或终止时写入)
     """
 
-    def __init__(self, task: Task, base_dir: Path | str):
+    def __init__(self, task: Task, base_dir: Path | str, metadata: dict[str, Any] | None = None):
         self.task = task
+        self.metadata = dict(metadata or {})
         self.dir = Path(base_dir) / task.task_id
         self.dir.mkdir(parents=True, exist_ok=True)
         self.trace_path = self.dir / "trace.jsonl"
@@ -90,6 +99,7 @@ class Session:
         self._start_ts: float = time.time()
         self._tokens_in: int = 0
         self._tokens_out: int = 0
+        self._cached_tokens: int = 0
         self._pending_interactions: list[dict[str, Any]] = []
         self._screenshots: dict[int, Path] = {}
         self._answer = ""
@@ -139,8 +149,16 @@ class Session:
         reasoning_time: float = 0.0,
         execution_time: float = 0.0,
         usage_already_counted: bool = False,
+        ui_context: str = "",
+        screen_unchanged_streak: int = 1,
     ) -> StepRecord:
         notes = list(notes or [])
+        if action_out.parse_error:
+            snippet = " ".join((action_out.raw_output or "").split())[:160]
+            notes.append(
+                "上一次输出不是合法动作 JSON："
+                f"{snippet}；下一步只输出一个 JSON 对象，不要解释。"
+            )
         if not self.history and self.used_memory_ids:
             notes.append("本次匹配记忆：" + ", ".join(self.used_memory_ids))
         record = StepRecord(
@@ -160,6 +178,8 @@ class Session:
             prompt_text=action_out.prompt_text,
             reasoning_time=reasoning_time,
             execution_time=execution_time,
+            ui_context=ui_context,
+            screen_unchanged_streak=screen_unchanged_streak,
         )
         return record
 
@@ -179,16 +199,18 @@ class Session:
         return count
 
     def consecutive_identical_actions(self) -> int:
-        """末尾连续多少步动作完全相同(action.type + parameters)。"""
+        """末尾连续多少步动作相同（坐标按手指宽度容差比较）。
+
+        原实现把坐标向下取整到 20 的桶里再比字符串，跨桶边界时会漏判
+        （例如 299 与 301 只差 2，却落进 280 和 300 两个桶）。这里改用
+        :func:`seetouch.harness.ledger.same_action` 的距离比较，与账本共用一套判定。
+        """
         if not self.history:
             return 0
-        import json as _json
-        last = self.history[-1]
-        last_key = (last.action.type, _json.dumps(last.action.parameters, sort_keys=True))
+        last = self.history[-1].action
         count = 0
         for rec in reversed(self.history):
-            key = (rec.action.type, _json.dumps(rec.action.parameters, sort_keys=True))
-            if key == last_key:
+            if same_action(last.type, last.parameters, rec.action.type, rec.action.parameters):
                 count += 1
             else:
                 break
@@ -226,6 +248,13 @@ class Session:
             answer_screenshot=self._answer_screenshot,
             used_memory_ids=self.used_memory_ids, learned_memory_id=self.learned_memory_id,
             learning_status=self.learning_status, memory_suggestions=self.memory_suggestions,
+            reasoner=self.metadata.get("reasoner"),
+            model_id=self.metadata.get("model_id"),
+            terminal_reason=self.terminal_reason,
+            started_at=self._start_ts,
+            finished_at=time.time(),
+            total_tokens=self._tokens_in + self._tokens_out,
+            total_cached_tokens=self._cached_tokens,
         )
         summary_obj: dict[str, Any] = asdict(result)
         try:
@@ -244,6 +273,7 @@ class Session:
             return
         self._tokens_in += int(usage.get("input_tokens") or 0)
         self._tokens_out += int(usage.get("output_tokens") or 0)
+        self._cached_tokens += int(usage.get("cached_tokens") or 0)
 
     def _append_trace(
         self,
@@ -253,8 +283,13 @@ class Session:
         prompt_text: str = "",
         reasoning_time: float = 0.0,
         execution_time: float = 0.0,
+        ui_context: str = "",
+        screen_unchanged_streak: int = 1,
     ) -> None:
         line: dict[str, Any] = {
+            "task_id": self.task.task_id,
+            "model_id": self.metadata.get("model_id"),
+            "reasoner": self.metadata.get("reasoner"),
             "step": record.step,
             "action_type": record.action.type,
             "parameters": record.action.parameters,
@@ -267,6 +302,8 @@ class Session:
             "prompt_text": prompt_text,
             "reasoning_time": reasoning_time,
             "execution_time": execution_time,
+            "ui_context": ui_context,
+            "screen_unchanged_streak": screen_unchanged_streak,
             "interactions": self._pending_interactions[:],
         }
         try:

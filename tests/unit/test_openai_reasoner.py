@@ -26,7 +26,8 @@ def test_proxy_request_and_action():
         requests.append(request)
         payload = json.loads(request.content)
         assert payload["model"] == "proxy-vision"
-        content = payload["messages"][0]["content"]
+        assert payload["messages"][0]["role"] == "system"
+        content = payload["messages"][1]["content"]
         assert content[0]["type"] == "text"
         assert content[1]["image_url"]["url"].startswith("data:image/")
         assert "thinking" not in payload
@@ -115,7 +116,8 @@ def test_responses_image_request():
         assert str(request.url) == "https://proxy.example/v1/responses"
         payload = json.loads(request.content)
         assert payload["store"] is False
-        content = payload["input"][0]["content"]
+        assert payload["input"][0]["role"] == "system"
+        content = payload["input"][1]["content"]
         assert content[0]["type"] == "input_text"
         assert content[1]["type"] == "input_image"
         assert content[1]["image_url"].startswith("data:image/")
@@ -139,7 +141,8 @@ def test_responses_image_request():
                 ))
             output = reasoner.predict("test", Image.new("RGB", (64, 64)), [])
     assert output.action.type == "COMPLETE"
-    assert output.usage == {"input_tokens": 15, "output_tokens": 5, "total_tokens": 20}
+    assert output.usage == {"input_tokens": 15, "output_tokens": 5, "total_tokens": 20,
+                           "cached_tokens": 0}
 
 
 @pytest.mark.parametrize("status", ["incomplete", "failed"])
